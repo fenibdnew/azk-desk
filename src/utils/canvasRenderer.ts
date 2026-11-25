@@ -32,9 +32,16 @@ export interface RenderCardParams {
 }
 
 export function getCanvasDimensions(aspectRatio: AspectRatio): { width: number; height: number } {
-  return aspectRatio === '1080x1350'
-    ? { width: 1080, height: 1350 }
-    : { width: 1080, height: 1080 };
+  switch (aspectRatio) {
+    case '1080x1350':
+      return { width: 1080, height: 1350 };
+    case '1080x1920':
+      return { width: 1080, height: 1920 };
+    case '1280x720':
+      return { width: 1280, height: 720 };
+    default:
+      return { width: 1080, height: 1080 };
+  }
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -428,20 +435,22 @@ function drawSlidePagination(
   brandCorner: CornerPosition,
   slideIndex: number,
   totalSlides: number,
-  overDark: boolean
+  overDark: boolean,
+  compact = false
 ) {
   if (totalSlides <= 1) return;
   const label = `${String(slideIndex + 1).padStart(2, '0')} / ${String(totalSlides).padStart(2, '0')}`;
   const isTopRightBusy = brandCorner === 'top-right';
-  const x = isTopRightBusy ? 54 : width - 54;
-  const y = 54;
+  const pad = compact ? 36 : 54;
+  const x = isTopRightBusy ? pad : width - pad;
+  const y = pad;
 
   ctx.save();
   ctx.direction = 'ltr';
-  ctx.font = '600 20px "JetBrains Mono", monospace';
+  ctx.font = compact ? '600 17px "JetBrains Mono", monospace' : '600 20px "JetBrains Mono", monospace';
   const tw = ctx.measureText(label).width;
-  const boxW = tw + 28;
-  const boxH = 40;
+  const boxW = tw + (compact ? 22 : 28);
+  const boxH = compact ? 34 : 40;
   const drawX = isTopRightBusy ? x : x - boxW;
 
   ctx.fillStyle = overDark ? 'rgba(9, 12, 18, 0.56)' : 'rgba(255, 255, 255, 0.86)';
@@ -527,9 +536,10 @@ function drawBrandLockup(
   brand: BrandSettings,
   logoImage: HTMLImageElement | null,
   theme: CardTheme,
-  overDarkSurface: boolean
+  overDarkSurface: boolean,
+  scaleFactor = 1
 ) {
-  const pad = Math.max(24, Math.min(100, brand.logoPadding));
+  const pad = Math.round(Math.max(24, Math.min(100, brand.logoPadding)) * scaleFactor);
   const hasLogo = Boolean(logoImage && logoImage.naturalWidth > 0);
   const showName = brand.showBrandWordmark && brand.brandName.trim().length > 0;
   const showHandle = brand.showBrandHandle && brand.brandHandle.trim().length > 0;
@@ -543,7 +553,7 @@ function drawBrandLockup(
   let logoW = 0;
   let logoH = 0;
   if (hasLogo && logoImage) {
-    const maxDim = Math.max(40, Math.min(240, brand.logoSize));
+    const maxDim = Math.round(Math.max(40, Math.min(240, brand.logoSize)) * scaleFactor);
     const ratio = logoImage.naturalWidth / logoImage.naturalHeight;
     if (ratio >= 1) {
       logoW = maxDim;
@@ -554,8 +564,11 @@ function drawBrandLockup(
     }
   }
 
-  const nameFontSize = Math.max(22, Math.min(34, Math.round(brand.logoSize * 0.28)));
-  const handleFontSize = Math.max(16, Math.round(nameFontSize * 0.68));
+  const nameFontSize = Math.max(
+    18,
+    Math.min(34, Math.round(brand.logoSize * 0.28 * scaleFactor))
+  );
+  const handleFontSize = Math.max(14, Math.round(nameFontSize * 0.68));
 
   ctx.font = `700 ${nameFontSize}px ${brandFontStack}`;
   const nameW = showName ? ctx.measureText(brand.brandName.trim()).width : 0;
@@ -643,7 +656,8 @@ function drawAttributionFooter(
   mutedColor: string,
   dividerColor: string,
   metaTypo: LayerTypography,
-  direction: TextDirection
+  direction: TextDirection,
+  scaleFactor = 1
 ) {
   const hasSource = source.trim().length > 0;
   const hasCredit = credit.trim().length > 0;
@@ -651,8 +665,8 @@ function drawAttributionFooter(
 
   const isRtl = direction === 'rtl';
   const metaStack = buildCanvasFontStack(metaTypo.fontFamily);
-  const sourceSize = Math.max(16, Math.min(30, metaTypo.fontSize));
-  const creditSize = Math.max(15, Math.min(28, metaTypo.fontSize - 2));
+  const sourceSize = Math.max(14, Math.min(30, Math.round(metaTypo.fontSize * scaleFactor)));
+  const creditSize = Math.max(13, Math.min(28, Math.round((metaTypo.fontSize - 2) * scaleFactor)));
 
   ctx.save();
   ctx.direction = direction;
@@ -733,16 +747,26 @@ export function renderNewsCard(params: RenderCardParams): void {
   const hookStack = buildCanvasFontStack(hookTypo.fontFamily);
   const bodyStack = buildCanvasFontStack(bodyTypo.fontFamily);
 
+  const isLandscape = aspectRatio === '1280x720';
+  const isStory = aspectRatio === '1080x1920';
+  const isPortrait = aspectRatio === '1080x1350';
+  const typeScale = isLandscape ? 0.78 : isStory ? 1.04 : 1;
+  const brandScale = isLandscape ? 0.78 : 1;
+
   const hasPhoto = background.mode === 'photo' && bgImage && bgImage.naturalWidth > 0;
-  const marginX = 72;
+  const marginX = isLandscape ? 60 : 72;
   const contentWidth = width - marginX * 2;
   const isLightTheme = isLightColor(theme.background);
   const warningActive = content.showWarning && content.warning.trim().length > 0;
   const scrimStyle: ScrimStyle = background.scrimStyle || 'bottom';
   const scrimAngle = background.scrimAngle ?? 180;
+  const badgeFontSize = Math.round(22 * typeScale);
+  const warnFontSize = Math.round(19 * typeScale);
+  const footerOffset = isStory ? 186 : isLandscape ? 78 : 104;
+  const topSafeY = isStory ? 260 : isLandscape ? 114 : 205;
 
   const getAnchorX = (leftEdge: number, rightEdge: number) => {
-    if (resolvedAlign === 'center') return width / 2;
+    if (resolvedAlign === 'center') return (leftEdge + rightEdge) / 2;
     return resolvedAlign === 'right' ? rightEdge : leftEdge;
   };
 
@@ -755,7 +779,134 @@ export function renderNewsCard(params: RenderCardParams): void {
   };
 
   if (layoutId === 'split') {
-    const photoHeight = Math.round(height * (aspectRatio === '1080x1350' ? 0.5 : 0.46));
+    if (isLandscape) {
+      // Crisp 16:9 broadcast horizontal split (45% media / 55% editorial panel)
+      const mediaW = Math.round(width * 0.45);
+      const mediaX = isRtl ? width - mediaW : 0;
+      const panelX = isRtl ? 0 : mediaW;
+      const panelW = width - mediaW;
+      const panelPadX = 52;
+      const panelTextW = panelW - panelPadX * 2;
+
+      drawBackgroundInRect(mediaX, 0, mediaW, height);
+
+      const topShade = ctx.createLinearGradient(0, 0, 0, 160);
+      topShade.addColorStop(0, 'rgba(0,0,0,0.42)');
+      topShade.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = topShade;
+      ctx.fillRect(mediaX, 0, mediaW, 160);
+
+      ctx.fillStyle = theme.background;
+      ctx.fillRect(panelX, 0, panelW, height);
+
+      ctx.fillStyle = theme.accent;
+      ctx.fillRect(isRtl ? mediaX - 6 : mediaW, 0, 6, height);
+
+      drawWatermarkLayer(ctx, width, height, watermark, watermarkLogoImage || logoImage, isLightTheme);
+
+      const anchorX = getAnchorX(panelX + panelPadX, panelX + panelW - panelPadX);
+      let cursorY = 66;
+
+      if (content.category.trim()) {
+        const badge = drawBadge(
+          ctx,
+          content.category.trim(),
+          anchorX,
+          cursorY,
+          theme.badgeBg,
+          theme.badgeText,
+          badgeFontSize,
+          resolvedAlign,
+          direction,
+          hookStack
+        );
+        cursorY += badge.height + 18;
+      }
+
+      if (warningActive) {
+        const warn = drawBadge(
+          ctx,
+          `⚠ ${content.warning.trim()}`,
+          anchorX,
+          cursorY,
+          theme.warningBg,
+          theme.warningText,
+          warnFontSize,
+          resolvedAlign,
+          direction,
+          hookStack
+        );
+        cursorY += warn.height + 14;
+      }
+
+      if (content.hook.trim()) {
+        const hkSize = Math.max(15, Math.min(26, Math.round((hookTypo.fontSize - 2) * typeScale)));
+        const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
+        ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
+        ctx.fillStyle = theme.accent;
+        ctx.textAlign = resolvedAlign;
+        ctx.textBaseline = 'top';
+        const hookLines = wrapText(ctx, content.hook.trim(), panelTextW, 2);
+        for (const line of hookLines) {
+          ctx.fillText(line, anchorX, cursorY);
+          cursorY += hkLineH;
+        }
+        cursorY += 8;
+      }
+
+      const hasBody = content.body.trim().length > 0;
+      const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
+      const hlSize = Math.min(hasBody ? 46 : 54, Math.max(30, baseHl - (hasBody ? 4 : 0)));
+      const hlLineH = Math.round(hlSize * hlTypo.lineHeight);
+      ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
+      ctx.fillStyle = theme.textPrimary;
+      ctx.textAlign = resolvedAlign;
+      ctx.textBaseline = 'top';
+      const hlLines = wrapText(ctx, content.headline, panelTextW, hasBody ? 4 : 5);
+      for (const line of hlLines) {
+        if (cursorY > height - 115) break;
+        ctx.fillText(line, anchorX, cursorY);
+        cursorY += hlLineH;
+      }
+
+      if (hasBody && cursorY < height - 110) {
+        cursorY += 12;
+        const bdSize = Math.max(15, Math.min(26, Math.round((bodyTypo.fontSize - 2) * typeScale)));
+        const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
+        ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
+        ctx.fillStyle = theme.textMuted;
+        ctx.textAlign = resolvedAlign;
+        ctx.textBaseline = 'top';
+        const bodyLines = wrapText(ctx, content.body, panelTextW, 3);
+        for (const line of bodyLines) {
+          if (cursorY > height - 98) break;
+          ctx.fillText(line, anchorX, cursorY);
+          cursorY += bdLineH;
+        }
+      }
+
+      drawAttributionFooter(
+        ctx,
+        panelX + panelPadX,
+        height - footerOffset,
+        panelTextW,
+        content.source,
+        content.credit,
+        theme.textPrimary,
+        theme.textMuted,
+        isLightTheme ? 'rgba(17,24,39,0.16)' : 'rgba(255,255,255,0.18)',
+        metaTypo,
+        direction,
+        typeScale
+      );
+
+      drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
+      drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, true);
+      ctx.restore();
+      return;
+    }
+
+    const photoHeight = Math.round(height * (isStory ? 0.46 : isPortrait ? 0.5 : 0.46));
     drawBackgroundInRect(0, 0, width, photoHeight);
 
     const topShade = ctx.createLinearGradient(0, 0, 0, 200);
@@ -782,14 +933,14 @@ export function renderNewsCard(params: RenderCardParams): void {
         photoHeight - 24,
         theme.badgeBg,
         theme.badgeText,
-        22,
+        badgeFontSize,
         resolvedAlign,
         direction,
         hookStack
       );
     }
 
-    let cursorY = photoHeight + 48;
+    let cursorY = photoHeight + (isStory ? 60 : 48);
 
     if (warningActive) {
       const warn = drawBadge(
@@ -799,7 +950,7 @@ export function renderNewsCard(params: RenderCardParams): void {
         cursorY,
         theme.warningBg,
         theme.warningText,
-        19,
+        warnFontSize,
         resolvedAlign,
         direction,
         hookStack
@@ -808,7 +959,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     }
 
     if (content.hook.trim()) {
-      const hkSize = Math.max(17, Math.min(34, hookTypo.fontSize - 2));
+      const hkSize = Math.max(17, Math.min(36, Math.round((hookTypo.fontSize - 2) * typeScale)));
       const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
       ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
       ctx.fillStyle = theme.accent;
@@ -823,31 +974,33 @@ export function renderNewsCard(params: RenderCardParams): void {
     }
 
     const hasBody = content.body.trim().length > 0;
-    const baseHl = hlTypo.fontSize || content.headlineSize;
-    const hlSize = Math.min(hasBody ? 64 : 76, Math.max(38, baseHl - (hasBody ? 8 : 4)));
+    const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
+    const hlSize = Math.min(hasBody ? 68 : 80, Math.max(38, baseHl - (hasBody ? 8 : 4)));
     const hlLineH = Math.round(hlSize * hlTypo.lineHeight);
     ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
     ctx.fillStyle = theme.textPrimary;
     ctx.textAlign = resolvedAlign;
     ctx.textBaseline = 'top';
-    const maxHeadlineLines = hasBody ? (aspectRatio === '1080x1350' ? 4 : 3) : 4;
+    const maxHeadlineLines = isStory ? (hasBody ? 5 : 6) : hasBody ? (isPortrait ? 4 : 3) : 4;
     const hlLines = wrapText(ctx, content.headline, contentWidth, maxHeadlineLines);
     for (const line of hlLines) {
       ctx.fillText(line, anchorX, cursorY);
       cursorY += hlLineH;
     }
 
-    if (hasBody && cursorY < height - 135) {
-      cursorY += 14;
-      const bdSize = Math.max(18, Math.min(36, bodyTypo.fontSize - 2));
+    const splitBottomGuard = height - footerOffset - 24;
+    if (hasBody && cursorY < splitBottomGuard) {
+      cursorY += 16;
+      const bdSize = Math.max(18, Math.min(38, Math.round((bodyTypo.fontSize - 2) * typeScale)));
       const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
       ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
       ctx.fillStyle = theme.textMuted;
       ctx.textAlign = resolvedAlign;
       ctx.textBaseline = 'top';
-      const bodyLines = wrapText(ctx, content.body, contentWidth, aspectRatio === '1080x1350' ? 4 : 3);
+      const maxBodyLines = isStory ? 5 : isPortrait ? 4 : 3;
+      const bodyLines = wrapText(ctx, content.body, contentWidth, maxBodyLines);
       for (const line of bodyLines) {
-        if (cursorY > height - 125) break;
+        if (cursorY > splitBottomGuard) break;
         ctx.fillText(line, anchorX, cursorY);
         cursorY += bdLineH;
       }
@@ -856,7 +1009,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     drawAttributionFooter(
       ctx,
       marginX,
-      height - 104,
+      height - footerOffset,
       contentWidth,
       content.source,
       content.credit,
@@ -864,11 +1017,12 @@ export function renderNewsCard(params: RenderCardParams): void {
       theme.textMuted,
       isLightTheme ? 'rgba(17,24,39,0.16)' : 'rgba(255,255,255,0.18)',
       metaTypo,
-      direction
+      direction,
+      typeScale
     );
 
-    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true);
-    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true);
+    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
+    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, false);
     ctx.restore();
     return;
   }
@@ -886,41 +1040,48 @@ export function renderNewsCard(params: RenderCardParams): void {
     );
     drawWatermarkLayer(ctx, width, height, watermark, watermarkLogoImage || logoImage, false);
 
+    const frameInset = isLandscape ? 24 : 36;
     ctx.strokeStyle = rgba('#FFFFFF', 0.22);
     ctx.lineWidth = 2;
-    ctx.strokeRect(36, 36, width - 72, height - 72);
+    ctx.strokeRect(frameInset, frameInset, width - frameInset * 2, height - frameInset * 2);
 
     ctx.fillStyle = theme.accent;
-    ctx.fillRect(36, 36, width - 72, 12);
+    ctx.fillRect(frameInset, frameInset, width - frameInset * 2, isLandscape ? 8 : 12);
 
-    const footerY = height - 116;
+    const footerY = height - (isStory ? 190 : isLandscape ? 78 : 116);
     const hasBody = content.body.trim().length > 0;
-    const baseHl = hlTypo.fontSize || content.headlineSize;
-    const hlSize = Math.min(hasBody ? 70 : 82, Math.max(40, baseHl - (hasBody ? 6 : 0)));
+    const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
+    const hlSize = Math.min(
+      Math.round((hasBody ? 70 : 82) * typeScale),
+      Math.max(30, baseHl - (hasBody ? 6 : 0))
+    );
     const hlLineHeight = Math.round(hlSize * hlTypo.lineHeight);
     ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
-    const hlLines = wrapText(ctx, content.headline, contentWidth - 24, hasBody ? 4 : 5);
+    const maxHlLines = isLandscape ? (hasBody ? 3 : 4) : isStory ? 6 : hasBody ? 4 : 5;
+    const hlLines = wrapText(ctx, content.headline, contentWidth - 24, maxHlLines);
     const hlBlockHeight = hlLines.length * hlLineHeight;
 
-    const bdSize = Math.max(18, Math.min(38, bodyTypo.fontSize - 2));
+    const bdSize = Math.max(15, Math.min(38, Math.round((bodyTypo.fontSize - 2) * typeScale)));
     const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
     ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
-    const bodyLines = hasBody ? wrapText(ctx, content.body, contentWidth - 24, 3) : [];
-    const bodyHeight = bodyLines.length > 0 ? bodyLines.length * bdLineH + 16 : 0;
+    const bodyLines = hasBody
+      ? wrapText(ctx, content.body, contentWidth - 24, isLandscape ? 2 : isStory ? 4 : 3)
+      : [];
+    const bodyHeight = bodyLines.length > 0 ? bodyLines.length * bdLineH + 14 : 0;
 
-    const hkSize = Math.max(18, Math.min(36, hookTypo.fontSize));
+    const hkSize = Math.max(15, Math.min(36, Math.round(hookTypo.fontSize * typeScale)));
     const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
     ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
     const hookLines = content.hook.trim() ? wrapText(ctx, content.hook.trim(), contentWidth - 24, 2) : [];
-    const hookHeight = hookLines.length > 0 ? hookLines.length * hkLineH + 14 : 0;
+    const hookHeight = hookLines.length > 0 ? hookLines.length * hkLineH + 12 : 0;
 
-    const warningHeight = warningActive ? 54 : 0;
-    const catHeight = content.category.trim() ? 58 : 0;
+    const warningHeight = warningActive ? Math.round(54 * typeScale) : 0;
+    const catHeight = content.category.trim() ? Math.round(58 * typeScale) : 0;
 
-    const panelPadding = 34;
+    const panelPadding = isLandscape ? 24 : 34;
     const panelTotalHeight =
-      panelPadding * 2 + catHeight + hookHeight + hlBlockHeight + bodyHeight + warningHeight + 12;
-    const panelY = Math.max(195, footerY - panelTotalHeight - 26);
+      panelPadding * 2 + catHeight + hookHeight + hlBlockHeight + bodyHeight + warningHeight + 10;
+    const panelY = Math.max(topSafeY, footerY - panelTotalHeight - (isLandscape ? 18 : 26));
 
     ctx.fillStyle = rgba(theme.background === '#F5F2EB' ? '#111827' : theme.background, 0.9);
     drawRoundedRect(ctx, marginX - 12, panelY, contentWidth + 24, panelTotalHeight, 12);
@@ -940,12 +1101,12 @@ export function renderNewsCard(params: RenderCardParams): void {
         y,
         theme.badgeBg,
         theme.badgeText,
-        22,
+        badgeFontSize,
         resolvedAlign,
         direction,
         hookStack
       );
-      y += 58;
+      y += catHeight;
     }
 
     if (hookLines.length > 0) {
@@ -957,7 +1118,7 @@ export function renderNewsCard(params: RenderCardParams): void {
         ctx.fillText(line, textAnchorX, y);
         y += hkLineH;
       }
-      y += 12;
+      y += 10;
     }
 
     ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
@@ -970,7 +1131,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     }
 
     if (bodyLines.length > 0) {
-      y += 14;
+      y += 12;
       ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
       ctx.fillStyle = '#E2E8F0';
       ctx.textAlign = resolvedAlign;
@@ -982,7 +1143,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     }
 
     if (warningActive) {
-      y += 14;
+      y += 12;
       drawBadge(
         ctx,
         `⚠ ${content.warning.trim()}`,
@@ -990,7 +1151,7 @@ export function renderNewsCard(params: RenderCardParams): void {
         y,
         theme.warningBg,
         theme.warningText,
-        19,
+        warnFontSize,
         resolvedAlign,
         direction,
         hookStack
@@ -1008,11 +1169,12 @@ export function renderNewsCard(params: RenderCardParams): void {
       '#CBD5E1',
       'rgba(255,255,255,0.22)',
       metaTypo,
-      direction
+      direction,
+      typeScale
     );
 
-    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true);
-    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true);
+    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
+    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, isLandscape);
     ctx.restore();
     return;
   }
@@ -1030,41 +1192,51 @@ export function renderNewsCard(params: RenderCardParams): void {
     );
     drawWatermarkLayer(ctx, width, height, watermark, watermarkLogoImage || logoImage, false);
 
+    const ruleY = isLandscape ? 118 : isStory ? 290 : 188;
     ctx.strokeStyle = rgba(theme.accent, 0.85);
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(width / 2 - 44, 188);
-    ctx.lineTo(width / 2 + 44, 188);
+    ctx.moveTo(width / 2 - 44, ruleY);
+    ctx.lineTo(width / 2 + 44, ruleY);
     ctx.stroke();
 
     const anchorX = getAnchorX(marginX + 20, width - marginX - 20);
     const usableW = contentWidth - 40;
     const hasBody = content.body.trim().length > 0;
 
-    const baseHl = hlTypo.fontSize || content.headlineSize;
-    const hlSize = Math.min(hasBody ? 68 : 76, Math.max(40, baseHl - (hasBody ? 8 : 4)));
+    const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
+    const hlSize = Math.min(
+      Math.round((hasBody ? 68 : 76) * typeScale),
+      Math.max(30, baseHl - (hasBody ? 6 : 2))
+    );
     const hlLineHeight = Math.round(hlSize * hlTypo.lineHeight);
     ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
-    const hlLines = wrapText(ctx, content.headline, usableW, hasBody ? 4 : 6);
+    const maxHlLines = isLandscape ? (hasBody ? 3 : 4) : isStory ? 7 : hasBody ? 4 : 6;
+    const hlLines = wrapText(ctx, content.headline, usableW, maxHlLines);
 
-    const bdSize = Math.max(18, Math.min(40, bodyTypo.fontSize));
+    const bdSize = Math.max(15, Math.min(40, Math.round(bodyTypo.fontSize * typeScale)));
     const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
     ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
-    const bodyLines = hasBody ? wrapText(ctx, content.body, usableW, 4) : [];
+    const bodyLines = hasBody ? wrapText(ctx, content.body, usableW, isLandscape ? 2 : 4) : [];
 
-    const hkSize = Math.max(18, Math.min(36, hookTypo.fontSize));
+    const hkSize = Math.max(15, Math.min(36, Math.round(hookTypo.fontSize * typeScale)));
     const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
     ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
     const hookLines = content.hook.trim() ? wrapText(ctx, content.hook.trim(), usableW, 2) : [];
 
-    const totalH =
-      (content.category.trim() ? 60 : 0) +
-      (hookLines.length > 0 ? hookLines.length * hkLineH + 18 : 0) +
-      hlLines.length * hlLineHeight +
-      (bodyLines.length > 0 ? bodyLines.length * bdLineH + 22 : 0) +
-      (warningActive ? 62 : 0);
+    const catH = content.category.trim() ? Math.round(60 * typeScale) : 0;
+    const warnH = warningActive ? Math.round(62 * typeScale) : 0;
 
-    let y = Math.max(216, (height - 130 - totalH) / 2);
+    const totalH =
+      catH +
+      (hookLines.length > 0 ? hookLines.length * hkLineH + 16 : 0) +
+      hlLines.length * hlLineHeight +
+      (bodyLines.length > 0 ? bodyLines.length * bdLineH + 18 : 0) +
+      warnH;
+
+    const availableBottom = height - footerOffset - 24;
+    const minQuoteY = ruleY + 26;
+    let y = Math.max(minQuoteY, (availableBottom + minQuoteY - totalH) / 2);
 
     if (content.category.trim()) {
       drawBadge(
@@ -1074,12 +1246,12 @@ export function renderNewsCard(params: RenderCardParams): void {
         y,
         theme.badgeBg,
         theme.badgeText,
-        22,
+        badgeFontSize,
         resolvedAlign,
         direction,
         hookStack
       );
-      y += 60;
+      y += catH;
     }
 
     if (hookLines.length > 0) {
@@ -1091,7 +1263,7 @@ export function renderNewsCard(params: RenderCardParams): void {
         ctx.fillText(line, anchorX, y);
         y += hkLineH;
       }
-      y += 18;
+      y += 14;
     }
 
     ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
@@ -1104,7 +1276,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     }
 
     if (bodyLines.length > 0) {
-      y += 20;
+      y += 16;
       ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
       ctx.fillStyle = rgba('#FFFFFF', 0.86);
       ctx.textAlign = resolvedAlign;
@@ -1116,7 +1288,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     }
 
     if (warningActive) {
-      y += 20;
+      y += 16;
       drawBadge(
         ctx,
         `⚠ ${content.warning.trim()}`,
@@ -1124,7 +1296,7 @@ export function renderNewsCard(params: RenderCardParams): void {
         y,
         theme.warningBg,
         theme.warningText,
-        19,
+        warnFontSize,
         resolvedAlign,
         direction,
         hookStack
@@ -1134,7 +1306,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     drawAttributionFooter(
       ctx,
       marginX,
-      height - 108,
+      height - footerOffset,
       contentWidth,
       content.source,
       content.credit,
@@ -1142,11 +1314,12 @@ export function renderNewsCard(params: RenderCardParams): void {
       '#CBD5E1',
       'rgba(255,255,255,0.2)',
       metaTypo,
-      direction
+      direction,
+      typeScale
     );
 
-    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true);
-    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true);
+    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
+    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, isLandscape);
     ctx.restore();
     return;
   }
@@ -1165,40 +1338,53 @@ export function renderNewsCard(params: RenderCardParams): void {
   drawWatermarkLayer(ctx, width, height, watermark, watermarkLogoImage || logoImage, false);
 
   ctx.fillStyle = theme.accent;
-  ctx.fillRect(0, 0, width, 10);
+  ctx.fillRect(0, 0, width, isLandscape ? 8 : 10);
 
-  const footerY = height - 104;
+  const footerY = height - footerOffset;
   const hasBody = content.body.trim().length > 0;
-  const baseHl = hlTypo.fontSize || content.headlineSize;
-  const hlSize = Math.min(hasBody ? 76 : 86, Math.max(40, baseHl - (hasBody ? 4 : 0)));
+  const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
+  const hlSize = Math.min(
+    Math.round((hasBody ? 76 : 86) * typeScale),
+    Math.max(32, baseHl - (hasBody ? 4 : 0))
+  );
   const hlLineHeight = Math.round(hlSize * hlTypo.lineHeight);
   ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
-  const hlLines = wrapText(
-    ctx,
-    content.headline,
-    contentWidth,
-    hasBody ? (aspectRatio === '1080x1350' ? 5 : 4) : aspectRatio === '1080x1350' ? 6 : 5
-  );
+  const maxEditorialHlLines = isLandscape
+    ? hasBody
+      ? 3
+      : 4
+    : isStory
+      ? hasBody
+        ? 6
+        : 7
+      : hasBody
+        ? isPortrait
+          ? 5
+          : 4
+        : isPortrait
+          ? 6
+          : 5;
+  const hlLines = wrapText(ctx, content.headline, contentWidth, maxEditorialHlLines);
 
-  const bdSize = Math.max(18, Math.min(40, bodyTypo.fontSize));
+  const bdSize = Math.max(15, Math.min(40, Math.round(bodyTypo.fontSize * typeScale)));
   const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
   ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
   const bodyLines = hasBody
-    ? wrapText(ctx, content.body, contentWidth, aspectRatio === '1080x1350' ? 4 : 3)
+    ? wrapText(ctx, content.body, contentWidth, isLandscape ? 2 : isStory ? 5 : isPortrait ? 4 : 3)
     : [];
 
-  const hkSize = Math.max(18, Math.min(36, hookTypo.fontSize));
+  const hkSize = Math.max(15, Math.min(36, Math.round(hookTypo.fontSize * typeScale)));
   const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
   ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
   const hookLines = content.hook.trim() ? wrapText(ctx, content.hook.trim(), contentWidth, 2) : [];
 
-  const warningH = warningActive ? 54 : 0;
-  const bodyH = bodyLines.length > 0 ? bodyLines.length * bdLineH + 18 : 0;
+  const warningH = warningActive ? Math.round(54 * typeScale) : 0;
+  const bodyH = bodyLines.length > 0 ? bodyLines.length * bdLineH + 16 : 0;
   const hlH = hlLines.length * hlLineHeight;
-  const hookH = hookLines.length > 0 ? hookLines.length * hkLineH + 14 : 0;
-  const catH = content.category.trim() ? 58 : 0;
+  const hookH = hookLines.length > 0 ? hookLines.length * hkLineH + 12 : 0;
+  const catH = content.category.trim() ? Math.round(58 * typeScale) : 0;
 
-  let y = Math.max(210, footerY - 32 - warningH - bodyH - hlH - hookH - catH);
+  let y = Math.max(topSafeY, footerY - (isLandscape ? 22 : 32) - warningH - bodyH - hlH - hookH - catH);
   const anchorX = getAnchorX(marginX, width - marginX);
 
   if (content.category.trim()) {
@@ -1209,12 +1395,12 @@ export function renderNewsCard(params: RenderCardParams): void {
       y,
       theme.badgeBg,
       theme.badgeText,
-      23,
+      Math.round(23 * typeScale),
       resolvedAlign,
       direction,
       hookStack
     );
-    y += 58;
+    y += catH;
   }
 
   if (hookLines.length > 0) {
@@ -1226,7 +1412,7 @@ export function renderNewsCard(params: RenderCardParams): void {
       ctx.fillText(line, anchorX, y);
       y += hkLineH;
     }
-    y += 12;
+    y += 10;
   }
 
   ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
@@ -1245,7 +1431,7 @@ export function renderNewsCard(params: RenderCardParams): void {
   ctx.shadowOffsetY = 0;
 
   if (bodyLines.length > 0) {
-    y += 16;
+    y += 14;
     ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
     ctx.fillStyle = rgba('#F8FAFC', 0.88);
     ctx.textAlign = resolvedAlign;
@@ -1257,7 +1443,7 @@ export function renderNewsCard(params: RenderCardParams): void {
   }
 
   if (warningActive) {
-    y += 14;
+    y += 12;
     drawBadge(
       ctx,
       `⚠ ${content.warning.trim()}`,
@@ -1265,7 +1451,7 @@ export function renderNewsCard(params: RenderCardParams): void {
       y,
       theme.warningBg,
       theme.warningText,
-      19,
+      warnFontSize,
       resolvedAlign,
       direction,
       hookStack
@@ -1283,10 +1469,11 @@ export function renderNewsCard(params: RenderCardParams): void {
     '#CBD5E1',
     'rgba(255,255,255,0.24)',
     metaTypo,
-    direction
+    direction,
+    typeScale
   );
 
-  drawBrandLockup(ctx, width, height, brand, logoImage, theme, true);
-  drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true);
+  drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
+  drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, isLandscape);
   ctx.restore();
 }

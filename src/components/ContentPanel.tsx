@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -114,6 +114,18 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
   const [activeLayer, setActiveLayer] = useState<TypoLayerKey>('headline');
   const [uploadingFont, setUploadingFont] = useState(false);
   const fontFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!openPicker && !showQuickPaste) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenPicker(null);
+        setShowQuickPaste(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [openPicker, showQuickPaste]);
 
   const readability = useMemo(() => evaluateSlideReadability(content), [content]);
 

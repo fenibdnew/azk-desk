@@ -3,6 +3,7 @@ import { Check, Copy, Download, RefreshCw, RotateCcw, Upload } from 'lucide-reac
 import { DailyConfig } from '../types/studio';
 import { UIStrings } from '../data/i18n';
 import { PWAInstallButton } from './PWAInstallButton';
+import { AboutCreatorInline } from './AboutCreatorModal';
 
 interface SyncConfigPanelProps {
   t: UIStrings;
@@ -17,6 +18,7 @@ interface SyncConfigPanelProps {
   onExportJson: () => void;
   onImportJsonFile: (file: File) => void;
   onRestoreDefaults: () => void;
+  onOpenAbout: () => void;
 }
 
 export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
@@ -32,6 +34,7 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
   onExportJson,
   onImportJsonFile,
   onRestoreDefaults,
+  onOpenAbout,
 }) => {
   const importInputRef = useRef<HTMLInputElement>(null);
   const [copied, setCopied] = useState(false);
@@ -194,6 +197,9 @@ export const SyncConfigPanel: React.FC<SyncConfigPanelProps> = ({
         </p>
         <PWAInstallButton t={t} />
       </div>
+
+      {/* About AZK Desk & Creator */}
+      <AboutCreatorInline t={t} onOpenModal={onOpenAbout} />
     </div>
   );
 };

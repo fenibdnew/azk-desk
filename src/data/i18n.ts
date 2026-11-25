@@ -42,10 +42,19 @@ export const UI_STRINGS = {
       prevSlide: 'Previous Slide',
       nextSlide: 'Next Slide',
       safeZones: 'Safe Zones',
+      fullscreenEnter: 'Fullscreen',
+      fullscreenExit: 'Exit Fullscreen',
+      dismiss: 'Dismiss',
     },
     canvas: {
-      square: '1080×1080 Square',
-      portrait: '1080×1350 Portrait',
+      square: '1:1 Square',
+      portrait: '4:5 Portrait',
+      story: '9:16 Story',
+      landscape: '16:9 Wide',
+      squareDesc: '1080×1080 Square (Feed)',
+      portraitDesc: '1080×1350 Portrait (Feed)',
+      storyDesc: '1080×1920 Story / Reels / Status',
+      landscapeDesc: '1280×720 Landscape / Web / X',
       livePreview: 'Native Canvas Preview',
       lightMode: 'Light Studio',
       darkMode: 'Dark Studio',
@@ -306,6 +315,23 @@ export const UI_STRINGS = {
       offlineReadyHint:
         'Cached via service worker for offline news card creation and ready for Windows (.exe) or Android (.apk) packaging.',
     },
+    about: {
+      buttonLabel: 'About & Creator',
+      title: 'About AZK Desk & Creator',
+      creatorName: 'ARIFUZZAMAN (Kiron)',
+      originLine: 'Built with honesty & purpose in Bangladesh',
+      paragraph1:
+        'AZK Desk is built by ARIFUZZAMAN (widely known as Kiron), a proud citizen of Bangladesh. Created to serve newsrooms, creators, and communities around the world without paid API barriers, AZK Desk stands for clarity, accountability, and standing firm against injustice.',
+      paragraph2:
+        'Through this work, the goal is to carry the pride, resilience, and map of Bangladesh to every corner of the globe—showing that meaningful software can come from any soil when driven by honesty and purpose.',
+      paragraph3:
+        'Warm thanks to everyone who sends wishes, support, and encouragement along the way. I never ask for travel or financial sponsorship. If this software genuinely helps you and you ever feel inspired out of goodwill to share a kind gesture or travel support, it is always received with humble gratitude—never as an obligation.',
+      close: 'Close',
+      readFullNote: 'Read Full Note',
+      uploadCreatorPhoto: 'Upload Photo',
+      removeCreatorPhoto: 'Remove Photo',
+      creatorPhotoHint: 'Local creator photo (saved in browser)',
+    },
     messages: {
       syncSuccess: 'Daily config synced successfully.',
       syncFallback: 'Could not reach remote URL — kept active offline config.',
@@ -335,6 +361,7 @@ export const UI_STRINGS = {
       fontFormatError: 'Unsupported font file. Please upload a .ttf, .otf, or .woff2 file.',
       fontSizeError: 'Font file exceeds 4 MB limit.',
       fontLoadError: 'Could not parse that font file. Try another .ttf, .otf, or .woff2 file.',
+      fullscreenUnavailable: 'Fullscreen is restricted in this embedded frame. Open in a browser tab or desktop app to use fullscreen.',
     },
   },
   bn: {
@@ -378,10 +405,19 @@ export const UI_STRINGS = {
       prevSlide: 'আগের স্লাইড',
       nextSlide: 'পরের স্লাইড',
       safeZones: 'সেফ-জোন',
+      fullscreenEnter: 'ফুলস্ক্রিন',
+      fullscreenExit: 'ফুলস্ক্রিন বন্ধ',
+      dismiss: 'বন্ধ করুন',
     },
     canvas: {
-      square: '১০৮০×১০৮০ স্কয়ার',
-      portrait: '১০৮০×১৩৫০ পোর্ট্রেট',
+      square: '১:১ স্কয়ার',
+      portrait: '৪:৫ পোর্ট্রেট',
+      story: '৯:১৬ স্টোরি',
+      landscape: '১৬:৯ ওয়াইড',
+      squareDesc: '১০৮০×১০৮০ স্কয়ার (ফিড)',
+      portraitDesc: '১০৮০×১৩৫০ পোর্ট্রেট (ফিড)',
+      storyDesc: '১০৮০×১৯২০ স্টোরি / রিলস / স্ট্যাটাস',
+      landscapeDesc: '১২৮০×৭২০ ল্যান্ডস্কেপ / ওয়েব / X',
       livePreview: 'নেটিভ ক্যানভাস প্রিভিউ',
       lightMode: 'লাইট স্টুডিও',
       darkMode: 'ডার্ক স্টুডিও',
@@ -642,6 +678,23 @@ export const UI_STRINGS = {
       offlineReadyHint:
         'সার্ভিস ওয়ার্কার দিয়ে অফলাইনে ব্যবহারযোগ্য এবং Windows (.exe) বা Android (.apk) প্যাকেজিংয়ের জন্য প্রস্তুত।',
     },
+    about: {
+      buttonLabel: 'পরিচিতি ও নির্মাতা',
+      title: 'এজেডকে ডেস্ক ও নির্মাতা পরিচিতি',
+      creatorName: 'আরিফুজ্জামান (কিরণ)',
+      originLine: 'সততা ও উদ্দেশ্য নিয়ে বাংলাদেশে নির্মিত',
+      paragraph1:
+        'এজেডকে ডেস্ক (AZK Desk) নির্মাণ করেছেন বাংলাদেশের গর্বিত নাগরিক আরিফুজ্জামান (যিনি কিরণ নামে পরিচিত)। কোনো পেইড API-এর বাধা ছাড়াই বিশ্বজুড়ে নিউজরুম, ক্রিয়েটর ও কমিউনিটির সেবায় তৈরি এই স্টুডিও স্বচ্ছতা, জবাবদিহিতা এবং অন্যায়ের বিরুদ্ধে দৃঢ় অবস্থানের প্রতীক।',
+      paragraph2:
+        'এই কাজের মাধ্যমে লক্ষ্য হলো বাংলাদেশের গর্ব, দৃঢ়তা ও মানচিত্রকে পৃথিবীর প্রতিটি প্রান্তে পৌঁছে দেওয়া—এটাই প্রমাণ করা যে সততা ও উদ্দেশ্য থাকলে যেকোনো মাটি থেকেই অর্থবহ সফটওয়্যার তৈরি সম্ভব।',
+      paragraph3:
+        'যাঁরা পথে পথে শুভেচ্ছা, সমর্থন ও অনুপ্রেরণা জানিয়েছেন তাঁদের সবার প্রতি আন্তরিক কৃতজ্ঞতা। আমি কখনোই ভ্রমণ বা আর্থিক স্পনসরশিপ চাই না। এই সফটওয়্যার যদি সত্যিই আপনার উপকারে আসে এবং সদিচ্ছা থেকে কখনো কোনো শুভেচ্ছা বা ভ্রমণ-সহায়তা দিতে ইচ্ছে করে, তা সর্বদা বিনম্র কৃতজ্ঞতার সাথে গৃহীত হবে—কখনোই কোনো বাধ্যবাধকতা হিসেবে নয়।',
+      close: 'বন্ধ করুন',
+      readFullNote: 'সম্পূর্ণ বার্তা পড়ুন',
+      uploadCreatorPhoto: 'ছবি যোগ করুন',
+      removeCreatorPhoto: 'ছবি সরান',
+      creatorPhotoHint: 'লোকাল নির্মাতার ছবি (ব্রাউজারে সংরক্ষিত)',
+    },
     messages: {
       syncSuccess: 'ডেইলি কনফিগ সফলভাবে সিঙ্ক হয়েছে।',
       syncFallback: 'রিমোট URL থেকে ডেটা আনা যায়নি — অফলাইন কনফিগ চালু রাখা হয়েছে।',
@@ -671,6 +724,7 @@ export const UI_STRINGS = {
       fontFormatError: 'শুধু .ttf, .otf অথবা .woff2 ফন্ট ফাইল সমর্থিত।',
       fontSizeError: 'ফন্ট ফাইল সর্বোচ্চ ৪ মেগাবাইট হতে পারবে।',
       fontLoadError: 'ফন্ট ফাইলটি লোড করা যায়নি। অন্য একটি .ttf/.otf/.woff2 ফাইল চেষ্টা করুন।',
+      fullscreenUnavailable: 'এই এমবেডেড ফ্রেমে ফুলস্ক্রিন সীমিত। ফুলস্ক্রিন ব্যবহার করতে আলাদা ট্যাব বা ডেস্কটপ অ্যাপে খুলুন।',
     },
   },
 } as const;

@@ -8,14 +8,19 @@ import {
   CopyPlus,
   Download,
   Grid,
+  Info,
   Layers,
+  Maximize2,
+  Minimize2,
   Moon,
   Plus,
   RefreshCw,
   Sun,
   Trash2,
+  X,
 } from 'lucide-react';
 import {
+  ALL_ASPECT_RATIOS,
   AspectRatio,
   BackgroundSettings,
   BrandSettings,
@@ -55,6 +60,7 @@ import { MediaPanel } from './components/MediaPanel';
 import { SyncConfigPanel } from './components/SyncConfigPanel';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { AboutCreatorModal } from './components/AboutCreatorModal';
 
 type WorkspaceTab = 'content' | 'news' | 'brand' | 'media' | 'sync';
 
@@ -367,6 +373,8 @@ export default function App() {
   const [exportProgress, setExportProgress] = useState<string | null>(null);
   const [rssNewCount, setRssNewCount] = useState(0);
   const [breakingItemBySlide, setBreakingItemBySlide] = useState<Record<string, string>>({});
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Toast feedback
   const [toast, setToast] = useState<{ text: string; tone: 'info' | 'error' } | null>(null);
@@ -374,6 +382,14 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const t = UI_STRINGS[lang];
+
+  const dismissToast = useCallback(() => {
+    setToast(null);
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+  }, []);
 
   const notify = useCallback((text: string, tone: 'info' | 'error' = 'info') => {
     setToast({ text, tone });
@@ -384,6 +400,31 @@ export default function App() {
       setToast(null);
     }, 3600);
   }, []);
+
+  // Track browser fullscreen state cleanly for desktop / Windows app usage
+  useEffect(() => {
+    const syncFullscreen = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen);
+  }, []);
+
+  const handleToggleFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        } else {
+          notify(t.messages.fullscreenUnavailable, 'error');
+        }
+      } else if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    } catch {
+      notify(t.messages.fullscreenUnavailable, 'error');
+    }
+  }, [notify, t.messages.fullscreenUnavailable]);
 
   const updateActiveSlide = useCallback(
     (updater: (prev: SlideData) => SlideData) => {
@@ -1204,8 +1245,8 @@ export default function App() {
           applyDailyConfig(validatedConfig, lang);
           if (raw.card && typeof raw.card === 'object') {
             const c = raw.card;
-            if (c.aspectRatio === '1080x1080' || c.aspectRatio === '1080x1350') {
-              setAspectRatio(c.aspectRatio);
+            if (ALL_ASPECT_RATIOS.includes(c.aspectRatio as AspectRatio)) {
+              setAspectRatio(c.aspectRatio as AspectRatio);
             }
             if (c.brand && typeof c.brand === 'object') {
               const safeLogoUrl =
@@ -1357,9 +1398,9 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F6F6F7] text-[#111827] dark:bg-[#0B0D11] dark:text-[#F3F4F6]">
-      {/* Top Bar Contract: Strict 3 zones separated by gap-8 */}
-      <header className="sticky top-0 z-30 h-[60px] flex items-center justify-between gap-8 px-4 sm:px-6 bg-white dark:bg-[#11141B] border-b border-zinc-200 dark:border-zinc-800">
+    <div className="min-h-[100dvh] w-full max-w-[100vw] overflow-x-hidden flex flex-col bg-[#F6F6F7] text-[#111827] dark:bg-[#0B0D11] dark:text-[#F3F4F6]">
+      {/* Top Bar Contract: Strict 3 zones separated cleanly */}
+      <header className="sticky top-0 z-30 h-[60px] flex items-center justify-between gap-4 sm:gap-8 px-3 sm:px-6 bg-white dark:bg-[#11141B] border-b border-zinc-200 dark:border-zinc-800">
         {/* Zone 1: Single text wordmark */}
         <span className="text-base sm:text-lg font-bold tracking-tight text-zinc-950 dark:text-white whitespace-nowrap shrink-0">
           {t.appName}
@@ -1378,7 +1419,7 @@ export default function App() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`relative py-5 inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
+                className={`relative py-5 inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                   active
                     ? 'text-zinc-950 dark:text-white font-semibold'
                     : 'text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
@@ -1398,13 +1439,23 @@ export default function App() {
           })}
         </nav>
 
-        {/* Zone 3: Single primary action */}
-        <div className="flex items-center shrink-0">
+        {/* Zone 3: Fullscreen toggle & Primary Export Action */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handleToggleFullscreen}
+            aria-label={isFullscreen ? t.actions.fullscreenExit : t.actions.fullscreenEnter}
+            title={isFullscreen ? t.actions.fullscreenExit : t.actions.fullscreenEnter}
+            className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#151922] text-zinc-700 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors shrink-0 cursor-pointer"
+          >
+            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+
           <button
             type="button"
             disabled={exporting}
             onClick={handleDownloadActivePng}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-[#DC2626] hover:bg-[#B91C1C] disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-[#DC2626] hover:bg-[#B91C1C] disabled:opacity-60 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <Download className="w-4 h-4 shrink-0" />
             <span>
@@ -1419,9 +1470,9 @@ export default function App() {
       </header>
 
       {/* Main Two-Column Studio Workspace */}
-      <main className="flex-1 flex flex-col-reverse lg:flex-row min-h-0">
+      <main className="flex-1 flex flex-col-reverse lg:flex-row min-h-0 w-full">
         {/* Left Inspector Column */}
-        <aside className="w-full lg:w-[440px] xl:w-[468px] shrink-0 bg-white dark:bg-[#11141B] border-t lg:border-t-0 lg:border-r border-zinc-200 dark:border-zinc-800 lg:h-[calc(100vh-60px)] lg:overflow-y-auto">
+        <aside className="w-full lg:w-[440px] xl:w-[468px] shrink-0 bg-white dark:bg-[#11141B] border-t lg:border-t-0 lg:border-r border-zinc-200 dark:border-zinc-800 lg:h-[calc(100dvh-60px)] lg:overflow-y-auto">
           {/* Mobile Tab Bar */}
           <div className="md:hidden flex items-center gap-1 p-2 border-b border-zinc-200 dark:border-zinc-800 overflow-x-auto bg-zinc-50 dark:bg-zinc-950">
             {navTabs.map((tab) => (
@@ -1599,40 +1650,41 @@ export default function App() {
                 onExportJson={handleExportJson}
                 onImportJsonFile={handleImportJsonFile}
                 onRestoreDefaults={handleRestoreDefaults}
+                onOpenAbout={() => setAboutOpen(true)}
               />
             )}
           </div>
         </aside>
 
         {/* Right Live Canvas Stage (Dominant Visual Focal Anchor) */}
-        <section className="flex-1 min-w-0 flex flex-col items-center justify-between px-4 sm:px-8 py-4 lg:h-[calc(100vh-60px)] lg:overflow-y-auto">
+        <section className="flex-1 min-w-0 flex flex-col items-center justify-between px-3 sm:px-6 lg:px-8 py-3.5 sm:py-4 lg:h-[calc(100dvh-60px)] lg:overflow-y-auto">
           {/* Workspace Canvas Toolbar */}
-          <div className="w-full max-w-[820px] flex flex-wrap items-center justify-between gap-2 pb-3">
-            {/* Left Group: Aspect Ratio & PNG Export Scale */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="inline-flex items-center p-1 rounded-lg bg-white dark:bg-[#151922] border border-zinc-200 dark:border-zinc-800">
-                <button
-                  type="button"
-                  onClick={() => setAspectRatio('1080x1080')}
-                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 tabular-nums ${
-                    aspectRatio === '1080x1080'
-                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
-                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
-                  }`}
-                >
-                  {t.canvas.square}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAspectRatio('1080x1350')}
-                  className={`px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 tabular-nums ${
-                    aspectRatio === '1080x1350'
-                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
-                      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
-                  }`}
-                >
-                  {t.canvas.portrait}
-                </button>
+          <div className="w-full max-w-[860px] flex flex-wrap items-center justify-between gap-2 pb-3">
+            {/* Left Group: 4 Aspect Ratios (1:1, 4:5, 9:16, 16:9) & PNG Export Scale */}
+            <div className="flex flex-wrap items-center gap-2 max-w-full">
+              <div className="inline-flex items-center p-1 rounded-lg bg-white dark:bg-[#151922] border border-zinc-200 dark:border-zinc-800 overflow-x-auto max-w-full">
+                {(
+                  [
+                    { id: '1080x1080', label: t.canvas.square, desc: t.canvas.squareDesc },
+                    { id: '1080x1350', label: t.canvas.portrait, desc: t.canvas.portraitDesc },
+                    { id: '1080x1920', label: t.canvas.story, desc: t.canvas.storyDesc },
+                    { id: '1280x720', label: t.canvas.landscape, desc: t.canvas.landscapeDesc },
+                  ] as Array<{ id: AspectRatio; label: string; desc: string }>
+                ).map((ratio) => (
+                  <button
+                    key={ratio.id}
+                    type="button"
+                    title={ratio.desc}
+                    onClick={() => setAspectRatio(ratio.id)}
+                    className={`px-2 sm:px-2.5 py-1.5 text-[11px] sm:text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 tabular-nums cursor-pointer ${
+                      aspectRatio === ratio.id
+                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
+                    }`}
+                  >
+                    {ratio.label}
+                  </button>
+                ))}
               </div>
 
               {/* Selectable Export Quality Scale (1x / 2x 2K / 4x UHD) */}
@@ -1746,6 +1798,16 @@ export default function App() {
 
               <button
                 type="button"
+                onClick={() => setAboutOpen(true)}
+                aria-label={t.about.title}
+                title={t.about.title}
+                className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#151922] text-zinc-700 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors shrink-0"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setStudioDark((prev) => !prev)}
                 aria-label={studioDark ? t.canvas.lightMode : t.canvas.darkMode}
                 title={studioDark ? t.canvas.lightMode : t.canvas.darkMode}
@@ -1774,7 +1836,13 @@ export default function App() {
 
               <div
                 className={`w-full transition-all duration-200 ${
-                  aspectRatio === '1080x1350' ? 'max-w-[408px]' : 'max-w-[500px]'
+                  aspectRatio === '1080x1920'
+                    ? 'max-w-[250px] sm:max-w-[295px]'
+                    : aspectRatio === '1080x1350'
+                      ? 'max-w-[350px] sm:max-w-[408px]'
+                      : aspectRatio === '1280x720'
+                        ? 'max-w-[680px] xl:max-w-[740px]'
+                        : 'max-w-[420px] sm:max-w-[500px]'
                 }`}
               >
                 <div className="relative rounded-xl overflow-hidden shadow-[0_20px_50px_-15px_rgba(0,0,0,0.22)] dark:shadow-[0_24px_60px_-12px_rgba(0,0,0,0.65)] ring-1 ring-black/10 dark:ring-white/10 bg-zinc-950">
@@ -1786,19 +1854,37 @@ export default function App() {
                     aria-label="Live news card canvas preview"
                   />
 
-                  {/* Optional Non-Exported Social Feed Safe-Zone Guides */}
+                  {/* Optional Non-Exported Ratio-Aware Social Feed Safe-Zone Guides */}
                   {showSafeZones && (
                     <div
                       aria-hidden="true"
                       className="pointer-events-none absolute inset-0"
                     >
-                      {/* Outer 6.5% editorial safe margin */}
-                      <div className="absolute inset-[6.5%] border border-dashed border-sky-400/80" />
+                      {/* Outer editorial / broadcast safe margin */}
+                      <div
+                        className={`absolute border border-dashed border-sky-400/80 ${
+                          aspectRatio === '1280x720' ? 'inset-[5.5%]' : 'inset-[6.5%]'
+                        }`}
+                      />
                       {/* Center vertical & horizontal alignment hairlines */}
                       <div className="absolute top-0 bottom-0 left-1/2 w-px bg-sky-400/35" />
                       <div className="absolute left-0 right-0 top-1/2 h-px bg-sky-400/35" />
-                      {/* Lower social feed UI clearance band */}
-                      <div className="absolute left-0 right-0 bottom-0 h-[12%] border-t border-dashed border-amber-400/80 bg-amber-400/10" />
+
+                      {/* 9:16 Story / Reels top profile & progress UI clearance */}
+                      {aspectRatio === '1080x1920' && (
+                        <div className="absolute left-0 right-0 top-0 h-[13.5%] border-b border-dashed border-amber-400/80 bg-amber-400/10" />
+                      )}
+
+                      {/* Lower UI / lower-third clearance band adapted per aspect ratio */}
+                      <div
+                        className={`absolute left-0 right-0 bottom-0 border-t border-dashed border-amber-400/80 bg-amber-400/10 ${
+                          aspectRatio === '1080x1920'
+                            ? 'h-[19%]'
+                            : aspectRatio === '1280x720'
+                              ? 'h-[10%]'
+                              : 'h-[12%]'
+                        }`}
+                      />
                     </div>
                   )}
                 </div>
@@ -1820,7 +1906,7 @@ export default function App() {
           </div>
 
           {/* 1–7 Slide Carousel Strip & Sequential Export Controls */}
-          <div className="w-full max-w-[820px] pt-3 space-y-2.5">
+          <div className="w-full max-w-[860px] pt-3 space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-white dark:bg-[#151922] border border-zinc-200 dark:border-zinc-800">
               <div className="flex items-center gap-1.5 overflow-x-auto">
                 {slides.map((sl, idx) => {
@@ -1946,33 +2032,58 @@ export default function App() {
                 <span aria-hidden="true">·</span>
                 <span>{lang === 'bn' ? activeTheme.nameBn : activeTheme.name}</span>
               </div>
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <span>
                   {showSafeZones
                     ? t.canvas.safeZoneNote
                     : `${t.sync.edition} ${config.editionDate}`}
                 </span>
+                <span aria-hidden="true">·</span>
+                <button
+                  type="button"
+                  onClick={() => setAboutOpen(true)}
+                  className="font-medium text-zinc-700 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 underline-offset-2 hover:underline transition-colors"
+                >
+                  {t.about.buttonLabel}
+                </button>
               </div>
             </div>
           </div>
         </section>
       </main>
 
+      {/* About AZK Desk & Creator Modal */}
+      <AboutCreatorModal
+        open={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        t={t}
+        onNotify={notify}
+      />
+
       {/* Offline Connectivity Indicator */}
       <OfflineIndicator t={t} />
 
-      {/* Action Feedback Toast */}
+      {/* Action Feedback Toast with Clean Close (X) Button */}
       {toast && (
         <div
           role="status"
           aria-live="polite"
-          className={`fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg text-xs font-medium shadow-lg border transition-all ${
+          className={`fixed bottom-4 left-4 right-4 sm:left-auto sm:right-5 z-50 inline-flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg text-xs font-medium shadow-lg border transition-all max-w-md ${
             toast.tone === 'error'
               ? 'bg-red-50 text-red-900 border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-900'
               : 'bg-zinc-900 text-white border-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:border-zinc-200'
           }`}
         >
-          {toast.text}
+          <span>{toast.text}</span>
+          <button
+            type="button"
+            onClick={dismissToast}
+            aria-label={t.actions.dismiss}
+            title={t.actions.dismiss}
+            className="p-0.5 -mr-1 rounded opacity-75 hover:opacity-100 transition-opacity shrink-0 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
     </div>

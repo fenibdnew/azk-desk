@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MonitorDown, Smartphone, X } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { UIStrings } from '../data/i18n';
@@ -11,6 +11,15 @@ interface PWAInstallButtonProps {
 export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ t, compact = false }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+
+  useEffect(() => {
+    if (!showIOSGuide) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowIOSGuide(false);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [showIOSGuide]);
 
   if (isInstalled) {
     return null;
@@ -47,17 +56,29 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ t, compact =
         </button>
 
         {showIOSGuide && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
-            <div className="w-full max-w-sm rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#11141B] p-5 shadow-xl space-y-3">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ios-install-guide-title"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
+            onClick={() => setShowIOSGuide(false)}
+          >
+            <div
+              className="w-full max-w-sm rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#11141B] p-5 shadow-xl space-y-3"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+                <h3
+                  id="ios-install-guide-title"
+                  className="text-sm font-semibold text-zinc-900 dark:text-white"
+                >
                   {t.pwa.iosGuideTitle}
                 </h3>
                 <button
                   type="button"
                   onClick={() => setShowIOSGuide(false)}
-                  aria-label="Close"
-                  className="p-1 rounded-md text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                  aria-label={t.pwa.close}
+                  className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:text-white dark:hover:bg-zinc-800 cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -70,7 +91,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ t, compact =
               <button
                 type="button"
                 onClick={() => setShowIOSGuide(false)}
-                className="w-full rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 py-2 text-xs font-semibold hover:opacity-90"
+                className="w-full rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 py-2 text-xs font-semibold hover:opacity-90 cursor-pointer"
               >
                 {t.pwa.close}
               </button>

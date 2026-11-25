@@ -17,6 +17,7 @@ import {
   Volume2,
   VolumeX,
   Wand2,
+  X,
 } from 'lucide-react';
 import {
   Language,
@@ -297,6 +298,7 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
   );
   const [newFingerprints, setNewFingerprints] = useState<Set<string>>(() => new Set());
   const [visualPulse, setVisualPulse] = useState(false);
+  const [dismissedFallback, setDismissedFallback] = useState(false);
 
   // Paste Raw News Text -> Auto-Fill Slide state
   const [rawText, setRawText] = useState('');
@@ -483,6 +485,7 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
   // Initial & filter-change load
   useEffect(() => {
     setNewFingerprints(new Set());
+    setDismissedFallback(false);
     fetchFeed(country, category, feedLang, {
       forceRefresh: false,
       resetFeed: true,
@@ -811,21 +814,32 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
           {/* Newly Arrived Visual Alert Strip */}
           {visualAlert && newFingerprints.size > 0 && (
             <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/70 bg-red-50 dark:bg-red-950/40 text-xs text-red-800 dark:text-red-200">
-              <span className="inline-flex items-center gap-1.5 font-semibold">
+              <span className="inline-flex items-center gap-1.5 font-semibold min-w-0">
                 <Sparkles className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />
-                <span>
+                <span className="truncate">
                   {newFingerprints.size === 1
                     ? t.news.newArrivedSingular
                     : `${newFingerprints.size} ${t.news.newArrivedPlural}`}
                 </span>
               </span>
-              <button
-                type="button"
-                onClick={() => setNewFingerprints(new Set())}
-                className="text-[11px] font-semibold underline underline-offset-2 text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-white cursor-pointer shrink-0"
-              >
-                {t.news.markSeen}
-              </button>
+              <div className="inline-flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setNewFingerprints(new Set())}
+                  className="text-[11px] font-semibold underline underline-offset-2 text-red-700 dark:text-red-300 hover:text-red-900 dark:hover:text-white cursor-pointer"
+                >
+                  {t.news.markSeen}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewFingerprints(new Set())}
+                  aria-label={t.actions.dismiss}
+                  title={t.actions.dismiss}
+                  className="p-0.5 rounded hover:bg-red-200/60 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           )}
 
@@ -989,9 +1003,20 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
             )}
 
             {customFeedError && (
-              <div className="flex items-start gap-2 p-2.5 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-300">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <span>{customFeedError}</span>
+              <div className="flex items-start justify-between gap-2 p-2.5 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-300">
+                <div className="flex items-start gap-2 min-w-0">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>{customFeedError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCustomFeedError(null)}
+                  aria-label={t.actions.dismiss}
+                  title={t.actions.dismiss}
+                  className="p-0.5 rounded hover:bg-red-200/60 dark:hover:bg-red-900/60 shrink-0 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
               </div>
             )}
           </div>
@@ -1005,8 +1030,18 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
                 value={filterText}
                 onChange={(e) => setFilterText(e.target.value)}
                 placeholder={t.news.filterPlaceholder}
-                className="w-full pl-8 pr-3 py-2 text-xs rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-600/30 focus:border-red-600"
+                className="w-full pl-8 pr-8 py-2 text-xs rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-600/30 focus:border-red-600"
               />
+              {filterText && (
+                <button
+                  type="button"
+                  onClick={() => setFilterText('')}
+                  aria-label={t.actions.clear}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
             {feed && (
@@ -1023,10 +1058,21 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
           </div>
 
           {/* Fallback Warning Banner */}
-          {feed?.fallback && (
-            <div className="flex items-start gap-2.5 p-3 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{feed.notice || t.news.fallbackNotice}</span>
+          {feed?.fallback && !dismissedFallback && (
+            <div className="flex items-start justify-between gap-2.5 p-3 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{feed.notice || t.news.fallbackNotice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDismissedFallback(true)}
+                aria-label={t.actions.dismiss}
+                title={t.actions.dismiss}
+                className="p-0.5 rounded hover:bg-amber-200/60 dark:hover:bg-amber-900/60 shrink-0 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
 

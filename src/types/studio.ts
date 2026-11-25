@@ -6,7 +6,14 @@ export type ExportScale = 1 | 2 | 4;
 
 export type FontWeightValue = 400 | 500 | 600 | 700;
 
-export type AspectRatio = '1080x1080' | '1080x1350';
+export type AspectRatio = '1080x1080' | '1080x1350' | '1080x1920' | '1280x720';
+
+export const ALL_ASPECT_RATIOS: AspectRatio[] = [
+  '1080x1080',
+  '1080x1350',
+  '1080x1920',
+  '1280x720',
+];
 
 export type CardLayoutId = 'editorial' | 'split' | 'breaking' | 'quote';
 
