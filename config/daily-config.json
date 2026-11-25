@@ -1,0 +1,283 @@
+{
+  "version": "2026.11",
+  "editionDate": "2026-11-25",
+  "defaultBrand": {
+    "name": "AZK DESK",
+    "nameBn": "এজেডকে ডেস্ক",
+    "handle": "@azkdesk"
+  },
+  "brandName": "AZK DESK",
+  "brandNameBn": "এজেডকে ডেস্ক",
+  "brandHandle": "@azkdesk",
+  "logoUrl": "",
+  "logoOpacity": 100,
+  "watermark": {
+    "enabled": true,
+    "source": "text",
+    "text": "@azkdesk",
+    "logoUrl": "",
+    "opacity": 22,
+    "angle": -24,
+    "mode": "corner",
+    "corner": "top-right",
+    "tileSpacing": 300
+  },
+  "starterDrafts": {
+    "en": [
+      {
+        "id": "en-breaking-brief",
+        "label": "EN · Breaking News Brief",
+        "category": "Breaking News",
+        "hook": "JUST IN · FIELD DISPATCH",
+        "headline": "Regional Transit Corridors Expand Clean Rail Links Across Six Major Hubs",
+        "body": "Officials confirmed upgraded electric signaling and unified commuter ticketing will roll out across northern and coastal lines starting next quarter.",
+        "source": "AZK Desk Newsroom · Feni",
+        "credit": "Photo: AZK Archive",
+        "warning": "Developing Story — Subject to Updates",
+        "themeId": "crimson-press",
+        "layoutId": "editorial",
+        "backdropId": "city-dusk"
+      },
+      {
+        "id": "en-tech-explainer",
+        "label": "EN · Tech & Open Tools",
+        "category": "Technology",
+        "hook": "OPEN SOURCE · DIGITAL DESK",
+        "headline": "Independent Newsrooms Adopt Browser-First Studios to Cut Publishing Costs",
+        "body": "Local editorial teams are moving to offline-ready web tools that run without paid API keys or third-party subscriptions.",
+        "source": "AZK Tech Desk",
+        "credit": "Graphic: AZK Desk",
+        "warning": "",
+        "themeId": "slate-bureau",
+        "layoutId": "split",
+        "backdropId": "tech-circuit"
+      },
+      {
+        "id": "en-climate-watch",
+        "label": "EN · Climate & Delta Watch",
+        "category": "Climate",
+        "hook": "SPECIAL REPORT · RIVER DELTA",
+        "headline": "Community Flood Sensors Deliver 48-Hour Early Alerts Across Coastal Districts",
+        "body": "Low-power telemetry stations installed along key embankments now relay live water levels directly to local disaster volunteers.",
+        "source": "AZK Climate Desk",
+        "credit": "Photo: Field Unit",
+        "warning": "Weather Advisory — Monitor Local Updates",
+        "themeId": "emerald-climate",
+        "layoutId": "breaking",
+        "backdropId": "climate-monsoon"
+      }
+    ],
+    "bn": [
+      {
+        "id": "bn-breaking-brief",
+        "label": "বাংলা · ব্রেকিং সংবাদ",
+        "category": "ব্রেকিং নিউজ",
+        "hook": "সর্বশেষ আপডেট · বিশেষ প্রতিবেদন",
+        "headline": "উপকূলীয় ও আঞ্চলিক যোগাযোগে আধুনিক রেল ও ডিজিটাল সিগন্যালিং চালুর উদ্যোগ",
+        "body": "যাত্রীসেবা দ্রুত ও নিরাপদ করতে আগামী প্রান্তিক থেকেই সমন্বিত টিকিটিং এবং আধুনিক ট্র্যাক মনিটরিং চালু করা হবে।",
+        "source": "এজেডকে ডেস্ক নিউজরুম · ফেনী",
+        "credit": "ছবি: এজেডকে আর্কাইভ",
+        "warning": "চলমান সংবাদ — নতুন তথ্য যুক্ত হচ্ছে",
+        "themeId": "crimson-press",
+        "layoutId": "editorial",
+        "backdropId": "city-dusk"
+      },
+      {
+        "id": "bn-economy-brief",
+        "label": "বাংলা · অর্থনীতি ও বাণিজ্য",
+        "category": "অর্থনীতি",
+        "hook": "বাজার বিশ্লেষণ · বাণিজ্য ডেস্ক",
+        "headline": "রপ্তানি বৈচিত্র্য ও ক্ষুদ্র উদ্যোক্তাদের ডিজিটাল লেনদেনে নতুন গতি",
+        "body": "প্রযুক্তিনির্ভর সরবরাহ ব্যবস্থা এবং সহজ পেমেন্ট সুবিধায় জেলা পর্যায়ের উদ্যোক্তাদের অংশগ্রহণ বাড়ছে।",
+        "source": "এজেডকে বাণিজ্য ডেস্ক",
+        "credit": "ছবি: এজেডকে ডেস্ক",
+        "warning": "",
+        "themeId": "midnight-gold",
+        "layoutId": "split",
+        "backdropId": "economy-exchange"
+      },
+      {
+        "id": "bn-climate-watch",
+        "label": "বাংলা · আবহাওয়া ও সতর্কবার্তা",
+        "category": "আবহাওয়া",
+        "hook": "নদী ও উপকূল · জরুরি পর্যবেক্ষণ",
+        "headline": "নদীর পানি ও আবহাওয়ার তাৎক্ষণিক তথ্য পৌঁছে যাচ্ছে স্থানীয় স্বেচ্ছাসেবকদের হাতে",
+        "body": "আগাম সতর্কবার্তার ফলে দুর্যোগ মোকাবিলায় উপকূলীয় ও ফেনী অঞ্চলের প্রস্তুতি আরও জোরদার হয়েছে।",
+        "source": "এজেডকে জলবায়ু ডেস্ক",
+        "credit": "ছবি: ফিল্ড ইউনিট",
+        "warning": "সতর্কতা — স্থানীয় প্রশাসনের নির্দেশনা অনুসরণ করুন",
+        "themeId": "emerald-climate",
+        "layoutId": "breaking",
+        "backdropId": "climate-monsoon"
+      }
+    ]
+  },
+  "quickIdeas": {
+    "hooks": {
+      "en": [
+        "JUST IN · FIELD DISPATCH",
+        "LIVE UPDATE · BREAKING DESK",
+        "EXPLAINER · WHAT YOU NEED TO KNOW",
+        "FACT CHECK · VERIFIED BRIEF",
+        "SPECIAL REPORT · GROUND REALITY",
+        "WORLD WIRE · TOP DEVELOPMENT",
+        "PUBLIC INTEREST · ACCOUNTABILITY WATCH"
+      ],
+      "bn": [
+        "সর্বশেষ আপডেট · ব্রেকিং ডেস্ক",
+        "এই মুহূর্তের খবর · সরাসরি",
+        "বিশ্লেষণ · যা জানা জরুরি",
+        "তথ্য যাচাই · সত্যতা নিশ্চিত",
+        "বিশেষ প্রতিবেদন · মাঠের চিত্র",
+        "বিশ্ব সংবাদ · মূল খবর",
+        "জনস্বার্থে · জবাবদিহি পর্যবেক্ষণ"
+      ]
+    },
+    "warnings": {
+      "en": [
+        "Developing Story — Subject to Updates",
+        "Unconfirmed Report — Awaiting Official Confirmation",
+        "Public Advisory — Verify Local Safety Notices",
+        "Weather Alert — Monitor Official Bulletins",
+        "Graphic Context — Viewer Discretion Advised",
+        "Correction / Clarification Notice"
+      ],
+      "bn": [
+        "চলমান সংবাদ — নতুন তথ্য যুক্ত হচ্ছে",
+        "প্রাথমিক তথ্য — আনুষ্ঠানিক নিশ্চিতকরণের অপেক্ষায়",
+        "জনসতর্কতা — স্থানীয় নির্দেশনা অনুসরণ করুন",
+        "আবহাওয়া সতর্কতা — সর্বশেষ বুলেটিন দেখুন",
+        "সংবেদনশীল বিষয়বস্তু — দর্শকের বিচক্ষণতা কাম্য",
+        "সংশোধনী ও স্পষ্টীকরণ বিজ্ঞপ্তি"
+      ]
+    }
+  },
+  "curated": {
+    "en": {
+      "hooks": [
+        "JUST IN · FIELD DISPATCH",
+        "LIVE UPDATE · BREAKING DESK",
+        "EXPLAINER · WHAT YOU NEED TO KNOW",
+        "FACT CHECK · VERIFIED BRIEF",
+        "SPECIAL REPORT · GROUND REALITY",
+        "PUBLIC INTEREST · ACCOUNTABILITY WATCH"
+      ],
+      "headlines": [
+        "Regional Transit Corridors Expand Clean Rail Links Across Six Major Hubs",
+        "Independent Newsrooms Adopt Browser-First Studios to Cut Publishing Costs",
+        "Community Flood Sensors Deliver 48-Hour Early Alerts Across Coastal Districts"
+      ],
+      "bodies": [
+        "Officials confirmed upgraded electric signaling and unified commuter ticketing will roll out starting next quarter.",
+        "Local editorial teams are moving to offline-ready web tools without paid API keys.",
+        "Low-power telemetry stations now relay live water levels directly to local disaster volunteers."
+      ],
+      "sources": [
+        "AZK Desk Newsroom · Feni",
+        "AZK World Desk",
+        "AZK Tech Desk",
+        "Official Press Release"
+      ],
+      "categories": [
+        "Breaking News",
+        "World",
+        "Bangladesh",
+        "Economy",
+        "Technology",
+        "Climate",
+        "Fact Check"
+      ],
+      "credits": [
+        "Photo: AZK Archive",
+        "Graphic: AZK Desk",
+        "Photo: Field Unit",
+        "Illustration: AZK Studio"
+      ],
+      "warnings": [
+        "Developing Story — Subject to Updates",
+        "Unconfirmed Report — Awaiting Official Confirmation",
+        "Public Advisory — Verify Local Safety Notices",
+        "Weather Alert — Monitor Official Bulletins"
+      ]
+    },
+    "bn": {
+      "hooks": [
+        "সর্বশেষ আপডেট · ব্রেকিং ডেস্ক",
+        "এই মুহূর্তের খবর · সরাসরি",
+        "বিশ্লেষণ · যা জানা জরুরি",
+        "তথ্য যাচাই · সত্যতা নিশ্চিত",
+        "বিশেষ প্রতিবেদন · মাঠের চিত্র",
+        "জনস্বার্থে · জবাবদিহি পর্যবেক্ষণ"
+      ],
+      "headlines": [
+        "উপকূলীয় ও আঞ্চলিক যোগাযোগে আধুনিক রেল ও ডিজিটাল সিগন্যালিং চালুর উদ্যোগ",
+        "রপ্তানি বৈচিত্র্য ও ক্ষুদ্র উদ্যোক্তাদের ডিজিটাল লেনদেনে নতুন গতি",
+        "নদীর পানি ও আবহাওয়ার তাৎক্ষণিক তথ্য পৌঁছে যাচ্ছে স্থানীয় স্বেচ্ছাসেবকদের হাতে"
+      ],
+      "bodies": [
+        "যাত্রীসেবা দ্রুত ও নিরাপদ করতে আগামী প্রান্তিক থেকেই সমন্বিত টিকিটিং চালু করা হবে।",
+        "প্রযুক্তিনির্ভর সরবরাহ ব্যবস্থায় জেলা পর্যায়ের উদ্যোক্তাদের অংশগ্রহণ বাড়ছে।",
+        "আগাম সতর্কবার্তার ফলে দুর্যোগ মোকাবিলায় স্থানীয় প্রস্তুতি আরও জোরদার হয়েছে।"
+      ],
+      "sources": [
+        "এজেডকে ডেস্ক নিউজরুম · ফেনী",
+        "এজেডকে বিশ্ব ডেস্ক",
+        "এজেডকে বাণিজ্য ডেস্ক",
+        "সরকারি বিজ্ঞপ্তি"
+      ],
+      "categories": [
+        "ব্রেকিং নিউজ",
+        "বাংলাদেশ",
+        "বিশ্ব সংবাদ",
+        "অর্থনীতি",
+        "প্রযুক্তি",
+        "আবহাওয়া",
+        "তথ্য যাচাই"
+      ],
+      "credits": [
+        "ছবি: এজেডকে আর্কাইভ",
+        "গ্রাফিক্স: এজেডকে ডেস্ক",
+        "ছবি: ফিল্ড ইউনিট",
+        "সংগৃহীত / লোকাল আপলোড"
+      ],
+      "warnings": [
+        "চলমান সংবাদ — নতুন তথ্য যুক্ত হচ্ছে",
+        "প্রাথমিক তথ্য — আনুষ্ঠানিক নিশ্চিতকরণের অপেক্ষায়",
+        "জনসতর্কতা — স্থানীয় নির্দেশনা অনুসরণ করুন",
+        "আবহাওয়া সতর্কতা — সর্বশেষ বুলেটিন দেখুন"
+      ]
+    }
+  },
+  "storyPresets": [
+    {
+      "id": "en-breaking-brief",
+      "lang": "en",
+      "label": "EN · Breaking News Brief",
+      "category": "Breaking News",
+      "hook": "JUST IN · FIELD DISPATCH",
+      "headline": "Regional Transit Corridors Expand Clean Rail Links Across Six Major Hubs",
+      "body": "Officials confirmed upgraded electric signaling and unified commuter ticketing will roll out across northern and coastal lines starting next quarter.",
+      "source": "AZK Desk Newsroom · Feni",
+      "credit": "Photo: AZK Archive",
+      "warning": "Developing Story — Subject to Updates",
+      "themeId": "crimson-press",
+      "layoutId": "editorial",
+      "backdropId": "city-dusk"
+    },
+    {
+      "id": "bn-breaking-brief",
+      "lang": "bn",
+      "label": "বাংলা · ব্রেকিং সংবাদ",
+      "category": "ব্রেকিং নিউজ",
+      "hook": "সর্বশেষ আপডেট · বিশেষ প্রতিবেদন",
+      "headline": "উপকূলীয় ও আঞ্চলিক যোগাযোগে আধুনিক রেল ও ডিজিটাল সিগন্যালিং চালুর উদ্যোগ",
+      "body": "যাত্রীসেবা দ্রুত ও নিরাপদ করতে আগামী প্রান্তিক থেকেই সমন্বিত টিকিটিং এবং আধুনিক ট্র্যাক মনিটরিং চালু করা হবে।",
+      "source": "এজেডকে ডেস্ক নিউজরুম · ফেনী",
+      "credit": "ছবি: এজেডকে আর্কাইভ",
+      "warning": "চলমান সংবাদ — নতুন তথ্য যুক্ত হচ্ছে",
+      "themeId": "crimson-press",
+      "layoutId": "editorial",
+      "backdropId": "city-dusk"
+    }
+  ]
+}
