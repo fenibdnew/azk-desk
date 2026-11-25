@@ -1,0 +1,6 @@
+{
+  "name": "DeskFrame Studio",
+  "description": "Modern English and Bengali News & Social Media Card Studio with live daily JSON sync, high-resolution HTML5 Canvas PNG export, brand/watermark controls, and stock/procedural backgrounds.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
