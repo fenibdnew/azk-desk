@@ -1,12 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Archive,
   ArrowLeft,
   ArrowRight,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Copy,
   CopyPlus,
   Download,
+  FileText,
   Grid,
   Info,
   Layers,
@@ -53,6 +58,7 @@ import { loadCanvasImage } from './utils/imageLoader';
 import { getCanvasDimensions, renderNewsCard } from './utils/canvasRenderer';
 import { generateSocialCaption } from './utils/captionGenerator';
 import { matchCopyrightSafeVisual } from './utils/safeVisualMatcher';
+import { canvasToPngBytes, createZipBlob, triggerBlobDownload } from './utils/zipBuilder';
 import {
   createDefaultTypography,
   loadCustomFontFromFile,
@@ -88,6 +94,7 @@ const STORAGE_KEYS = {
   customFonts: 'azkdesk_custom_fonts',
   exportScale: 'azkdesk_export_scale',
   autoMatchSafeVisual: 'azkdesk_auto_match_safe_visual',
+  autosavedDraft: 'azkdesk_autosaved_draft_v1',
 };
 
 function safeReadStorage(key: string, fallback: string): string {
@@ -281,8 +288,11 @@ function createInitialSlide(): SlideData {
       hook: starter.hook,
       headline: starter.headline,
       body: starter.body,
+      speakerName: '',
+      speakerRole: '',
       source: starter.source,
       credit: starter.credit,
+      showVerifiedRssStamp: false,
       warning: starter.warning,
       showWarning: Boolean(starter.warning),
       headlineSize: 64,
@@ -292,6 +302,46 @@ function createInitialSlide(): SlideData {
       typography: createDefaultTypography(),
     },
     background: createDefaultBackground(STUDIO_BACKDROPS[0].url),
+  };
+}
+
+function sanitizeCardContent(rawContent: unknown, fallback: CardContent): CardContent {
+  if (!rawContent || typeof rawContent !== 'object') return fallback;
+  const c = rawContent as Record<string, unknown>;
+  return {
+    category: sanitizePlainText(c.category, 60, fallback.category),
+    hook: sanitizePlainText(c.hook, 140, fallback.hook),
+    headline: sanitizeMultilineText(c.headline, 320, fallback.headline),
+    body: typeof c.body === 'string' ? sanitizeMultilineText(c.body, 600, '') : fallback.body,
+    speakerName:
+      typeof c.speakerName === 'string'
+        ? sanitizePlainText(c.speakerName, 80, '')
+        : fallback.speakerName || '',
+    speakerRole:
+      typeof c.speakerRole === 'string'
+        ? sanitizePlainText(c.speakerRole, 120, '')
+        : fallback.speakerRole || '',
+    source: sanitizePlainText(c.source, 120, fallback.source),
+    credit: sanitizePlainText(c.credit, 120, fallback.credit),
+    showVerifiedRssStamp:
+      typeof c.showVerifiedRssStamp === 'boolean'
+        ? c.showVerifiedRssStamp
+        : Boolean(fallback.showVerifiedRssStamp),
+    warning: sanitizePlainText(c.warning, 160, fallback.warning),
+    showWarning: typeof c.showWarning === 'boolean' ? c.showWarning : fallback.showWarning,
+    headlineSize:
+      typeof c.headlineSize === 'number' && Number.isFinite(c.headlineSize)
+        ? Math.min(110, Math.max(36, Math.round(c.headlineSize)))
+        : fallback.headlineSize,
+    headlineFont:
+      c.headlineFont === 'serif' || c.headlineFont === 'sans'
+        ? c.headlineFont
+        : fallback.headlineFont,
+    textAlign:
+      c.textAlign === 'center' || c.textAlign === 'left' ? c.textAlign : fallback.textAlign,
+    direction:
+      c.direction === 'rtl' ? 'rtl' : c.direction === 'ltr' ? 'ltr' : fallback.direction,
+    typography: mergeTypography(c.typography, fallback.typography),
   };
 }
 
@@ -438,6 +488,181 @@ function downloadCanvasBlob(canvas: HTMLCanvasElement, filename: string): Promis
   });
 }
 
+interface AutosavedDraftPayload {
+  aspectRatio?: AspectRatio;
+  activeSlideIndex?: number;
+  slides?: SlideData[];
+  brand?: Partial<BrandSettings>;
+  watermark?: Partial<WatermarkSettings>;
+}
+
+function loadAutosavedDraft(fallbackConfig: DailyConfig): {
+  aspectRatio: AspectRatio;
+  slides: SlideData[];
+  activeSlideIndex: number;
+  brand: BrandSettings;
+  watermark: WatermarkSettings;
+  restored: boolean;
+} {
+  const defaultBrand: BrandSettings = {
+    brandName: fallbackConfig.brandName,
+    brandHandle: fallbackConfig.brandHandle,
+    showBrandHandle: true,
+    logoUrl: fallbackConfig.logoUrl,
+    logoSize: 96,
+    logoOpacity: fallbackConfig.logoOpacity,
+    logoCorner: 'top-left',
+    logoPadding: 54,
+    showBrandWordmark: true,
+  };
+  const defaultWatermark: WatermarkSettings = { ...fallbackConfig.watermark };
+  const initialSlides = [createInitialSlide()];
+
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.autosavedDraft);
+    if (!raw) {
+      return {
+        aspectRatio: '1080x1080',
+        slides: initialSlides,
+        activeSlideIndex: 0,
+        brand: defaultBrand,
+        watermark: defaultWatermark,
+        restored: false,
+      };
+    }
+
+    const parsed = safeJsonParse<AutosavedDraftPayload>(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return {
+        aspectRatio: '1080x1080',
+        slides: initialSlides,
+        activeSlideIndex: 0,
+        brand: defaultBrand,
+        watermark: defaultWatermark,
+        restored: false,
+      };
+    }
+
+    const validLayouts: CardLayoutId[] = ['editorial', 'split', 'breaking', 'quote'];
+    const validCorners: BrandSettings['logoCorner'][] = [
+      'top-left',
+      'top-right',
+      'bottom-left',
+      'bottom-right',
+    ];
+
+    let restoredSlides = initialSlides;
+    if (Array.isArray(parsed.slides) && parsed.slides.length > 0) {
+      restoredSlides = parsed.slides.slice(0, MAX_SLIDES).map((entry, idx) => {
+        const base = createInitialSlide();
+        const sl = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+        return {
+          id: sanitizePlainText(sl.id, 60, `draft-slide-${Date.now()}-${idx + 1}`),
+          layoutId: validLayouts.includes(sl.layoutId as CardLayoutId)
+            ? (sl.layoutId as CardLayoutId)
+            : base.layoutId,
+          themeId: sanitizePlainText(sl.themeId, 40, fallbackConfig.themes[0].id),
+          content: sanitizeCardContent(sl.content, base.content),
+          background: sanitizeImportedBackground(sl.background, base.background),
+        };
+      });
+    }
+
+    const restoredRatio: AspectRatio = ALL_ASPECT_RATIOS.includes(parsed.aspectRatio as AspectRatio)
+      ? (parsed.aspectRatio as AspectRatio)
+      : '1080x1080';
+
+    const restoredIndex =
+      typeof parsed.activeSlideIndex === 'number' && Number.isInteger(parsed.activeSlideIndex)
+        ? Math.min(Math.max(0, parsed.activeSlideIndex), restoredSlides.length - 1)
+        : 0;
+
+    const rawB = (parsed.brand && typeof parsed.brand === 'object'
+      ? parsed.brand
+      : {}) as Record<string, unknown>;
+    const safeBrandLogo =
+      typeof rawB.logoUrl === 'string' && (rawB.logoUrl === '' || isSafeMediaUrl(rawB.logoUrl))
+        ? rawB.logoUrl
+        : defaultBrand.logoUrl;
+    const restoredBrand: BrandSettings = {
+      brandName: sanitizePlainText(rawB.brandName, 80, defaultBrand.brandName),
+      brandHandle: sanitizePlainText(rawB.brandHandle, 60, defaultBrand.brandHandle),
+      showBrandHandle:
+        typeof rawB.showBrandHandle === 'boolean'
+          ? rawB.showBrandHandle
+          : defaultBrand.showBrandHandle,
+      logoUrl: safeBrandLogo,
+      logoSize:
+        typeof rawB.logoSize === 'number' && Number.isFinite(rawB.logoSize)
+          ? Math.min(220, Math.max(48, Math.round(rawB.logoSize)))
+          : defaultBrand.logoSize,
+      logoOpacity:
+        typeof rawB.logoOpacity === 'number' && Number.isFinite(rawB.logoOpacity)
+          ? Math.min(100, Math.max(10, Math.round(rawB.logoOpacity)))
+          : defaultBrand.logoOpacity,
+      logoCorner: validCorners.includes(rawB.logoCorner as BrandSettings['logoCorner'])
+        ? (rawB.logoCorner as BrandSettings['logoCorner'])
+        : defaultBrand.logoCorner,
+      logoPadding:
+        typeof rawB.logoPadding === 'number' && Number.isFinite(rawB.logoPadding)
+          ? Math.min(96, Math.max(24, Math.round(rawB.logoPadding)))
+          : defaultBrand.logoPadding,
+      showBrandWordmark:
+        typeof rawB.showBrandWordmark === 'boolean'
+          ? rawB.showBrandWordmark
+          : defaultBrand.showBrandWordmark,
+    };
+
+    const rawW = (parsed.watermark && typeof parsed.watermark === 'object'
+      ? parsed.watermark
+      : {}) as Record<string, unknown>;
+    const safeWmLogo =
+      typeof rawW.logoUrl === 'string' && (rawW.logoUrl === '' || isSafeMediaUrl(rawW.logoUrl))
+        ? rawW.logoUrl
+        : defaultWatermark.logoUrl;
+    const restoredWatermark: WatermarkSettings = {
+      enabled: typeof rawW.enabled === 'boolean' ? rawW.enabled : defaultWatermark.enabled,
+      source: rawW.source === 'logo' || rawW.source === 'text' ? rawW.source : defaultWatermark.source,
+      text: sanitizePlainText(rawW.text, 80, defaultWatermark.text),
+      logoUrl: safeWmLogo,
+      opacity:
+        typeof rawW.opacity === 'number' && Number.isFinite(rawW.opacity)
+          ? Math.min(80, Math.max(5, Math.round(rawW.opacity)))
+          : defaultWatermark.opacity,
+      angle:
+        typeof rawW.angle === 'number' && Number.isFinite(rawW.angle)
+          ? Math.min(60, Math.max(-60, Math.round(rawW.angle)))
+          : defaultWatermark.angle,
+      mode: rawW.mode === 'tiled' || rawW.mode === 'corner' ? rawW.mode : defaultWatermark.mode,
+      corner: validCorners.includes(rawW.corner as WatermarkSettings['corner'])
+        ? (rawW.corner as WatermarkSettings['corner'])
+        : defaultWatermark.corner,
+      tileSpacing:
+        typeof rawW.tileSpacing === 'number' && Number.isFinite(rawW.tileSpacing)
+          ? Math.min(480, Math.max(180, Math.round(rawW.tileSpacing)))
+          : defaultWatermark.tileSpacing,
+    };
+
+    return {
+      aspectRatio: restoredRatio,
+      slides: restoredSlides,
+      activeSlideIndex: restoredIndex,
+      brand: restoredBrand,
+      watermark: restoredWatermark,
+      restored: true,
+    };
+  } catch {
+    return {
+      aspectRatio: '1080x1080',
+      slides: initialSlides,
+      activeSlideIndex: 0,
+      brand: defaultBrand,
+      watermark: defaultWatermark,
+      restored: false,
+    };
+  }
+}
+
 export default function App() {
   const [lang, setLang] = useState<Language>(() => {
     const saved = safeReadStorage(STORAGE_KEYS.lang, 'en');
@@ -459,35 +684,29 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
+  // Restore auto-saved local draft cleanly on load so work is never lost
+  const initialDraft = useMemo(() => loadAutosavedDraft(config), []);
+
   // Canvas & Carousel state (1 to 7 slides)
-  const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1080x1080');
+  const [aspectRatio, setAspectRatio] = useState<AspectRatio>(initialDraft.aspectRatio);
   const [exportScale, setExportScale] = useState<ExportScale>(() => {
     const saved = safeReadStorage(STORAGE_KEYS.exportScale, '1');
     return saved === '2' ? 2 : saved === '4' ? 4 : 1;
   });
   const [showSafeZones, setShowSafeZones] = useState<boolean>(false);
-  const [slides, setSlides] = useState<SlideData[]>(() => [createInitialSlide()]);
-  const [activeSlideIndex, setActiveSlideIndex] = useState<number>(0);
+  const [slides, setSlides] = useState<SlideData[]>(initialDraft.slides);
+  const [activeSlideIndex, setActiveSlideIndex] = useState<number>(initialDraft.activeSlideIndex);
 
   const safeActiveIndex = Math.min(activeSlideIndex, Math.max(0, slides.length - 1));
   const activeSlide = slides[safeActiveIndex] || slides[0];
 
   // Shared Brand & Watermark state across all slides
-  const [brand, setBrand] = useState<BrandSettings>(() => ({
-    brandName: config.brandName,
-    brandHandle: config.brandHandle,
-    showBrandHandle: true,
-    logoUrl: config.logoUrl,
-    logoSize: 96,
-    logoOpacity: config.logoOpacity,
-    logoCorner: 'top-left',
-    logoPadding: 54,
-    showBrandWordmark: true,
-  }));
-
-  const [watermark, setWatermark] = useState<WatermarkSettings>(() => ({
-    ...config.watermark,
-  }));
+  const [brand, setBrand] = useState<BrandSettings>(initialDraft.brand);
+  const [watermark, setWatermark] = useState<WatermarkSettings>(initialDraft.watermark);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const [captionBoxOpen, setCaptionBoxOpen] = useState<boolean>(true);
+  const [captionBoxScope, setCaptionBoxScope] = useState<'active' | 'all'>('active');
+  const [captionCopiedFlash, setCaptionCopiedFlash] = useState<boolean>(false);
 
   // Saved Brand Profiles & Custom Uploaded Fonts in LocalStorage
   const [savedProfiles, setSavedProfiles] = useState<SavedBrandProfile[]>(() =>
@@ -594,6 +813,54 @@ export default function App() {
   useEffect(() => {
     safeWriteStorage(STORAGE_KEYS.exportScale, String(exportScale));
   }, [exportScale]);
+
+  // Automatic local draft saving (debounced 600ms with quota-safe fallback for large device photos)
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const payload: AutosavedDraftPayload = {
+        aspectRatio,
+        activeSlideIndex: safeActiveIndex,
+        slides,
+        brand,
+        watermark,
+      };
+      let saved = safeWriteStorage(STORAGE_KEYS.autosavedDraft, JSON.stringify(payload));
+      if (!saved) {
+        // Fallback: preserve all text/layout/backdrop settings while omitting oversized local data URLs
+        const compactPayload: AutosavedDraftPayload = {
+          aspectRatio,
+          activeSlideIndex: safeActiveIndex,
+          slides: slides.map((sl) => ({
+            ...sl,
+            background: {
+              ...sl.background,
+              imageUrl: sl.background.imageUrl.startsWith('data:image/')
+                ? STUDIO_BACKDROPS[0].url
+                : sl.background.imageUrl,
+            },
+          })),
+          brand: {
+            ...brand,
+            logoUrl: brand.logoUrl.startsWith('data:image/') ? '' : brand.logoUrl,
+          },
+          watermark: {
+            ...watermark,
+            logoUrl: watermark.logoUrl.startsWith('data:image/') ? '' : watermark.logoUrl,
+          },
+        };
+        saved = safeWriteStorage(STORAGE_KEYS.autosavedDraft, JSON.stringify(compactPayload));
+      }
+      if (saved) {
+        setDraftSavedAt(
+          new Date().toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        );
+      }
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [aspectRatio, safeActiveIndex, slides, brand, watermark, lang]);
 
   // Re-render canvas once Google Fonts & any saved custom fonts finish loading
   useEffect(() => {
@@ -971,6 +1238,53 @@ export default function App() {
     }));
   };
 
+  // 1-click Quote Card preset with oversized quote mark, serif styling, and speaker fields
+  const handleApplyQuotePreset = () => {
+    const quoteFont = lang === 'bn' ? 'Noto Serif Bengali' : 'Fraunces';
+    const sampleQuote =
+      lang === 'bn'
+        ? 'সঠিক তথ্য ও স্বচ্ছ ব্যাখ্যাই জনআস্থার সবচেয়ে বড় ভিত্তি।'
+        : 'Clear reporting and verified facts remain the strongest foundation of public trust.';
+    const sampleSpeaker = lang === 'bn' ? 'ড. ফারহানা রহমান' : 'Dr. Farhana Rahman';
+    const sampleRole =
+      lang === 'bn'
+        ? 'প্রধান অর্থনীতিবিদ · নীতি গবেষণা কেন্দ্র'
+        : 'Chief Economist · Center for Public Policy';
+
+    updateActiveSlide((prev) => {
+      const currentHeadline = prev.content.headline.trim();
+      const isStarterHeadline =
+        !currentHeadline ||
+        DEFAULT_DAILY_CONFIG.storyPresets.some((sp) => sp.headline === currentHeadline);
+      return {
+        ...prev,
+        layoutId: 'quote',
+        content: {
+          ...prev.content,
+          category:
+            prev.content.category.trim() || (lang === 'bn' ? 'বিশেষ উক্তি' : 'Editorial Quote'),
+          headline: isStarterHeadline ? sampleQuote : prev.content.headline,
+          speakerName: prev.content.speakerName?.trim() || sampleSpeaker,
+          speakerRole: prev.content.speakerRole?.trim() || sampleRole,
+          headlineFont: 'serif',
+          textAlign: 'center',
+          typography: {
+            ...prev.content.typography,
+            headline: {
+              ...prev.content.typography.headline,
+              fontFamily: quoteFont,
+            },
+          },
+        },
+        background: {
+          ...prev.background,
+          scrimOpacity: Math.max(prev.background.scrimOpacity, 68),
+        },
+      };
+    });
+    notify(t.messages.quotePresetApplied);
+  };
+
   // Resolve & apply a 100% copyright-safe visual (Wikimedia PD/CC0 or built-in editorial backdrop)
   const applySafeVisualToSlideById = useCallback(
     async (
@@ -1048,6 +1362,7 @@ export default function App() {
         headline: item.headline,
         body: item.summary && item.summary !== item.hook ? item.summary : '',
         source: item.source,
+        showVerifiedRssStamp: true,
       },
     }));
     notify(t.messages.rssApplied);
@@ -1088,6 +1403,7 @@ export default function App() {
           headline: item.headline,
           body: item.summary && item.summary !== item.hook ? item.summary : '',
           source: item.source,
+          showVerifiedRssStamp: true,
           warning: liveWarning,
           showWarning: true,
         },
@@ -1115,6 +1431,7 @@ export default function App() {
           headline: item.headline,
           body: item.summary && item.summary !== item.hook ? item.summary : '',
           source: item.source,
+          showVerifiedRssStamp: true,
           showWarning: false,
         },
       }));
@@ -1147,6 +1464,7 @@ export default function App() {
         headline: item.headline,
         body: item.summary && item.summary !== item.hook ? item.summary : '',
         source: item.source,
+        showVerifiedRssStamp: true,
         warning: '',
         showWarning: false,
       },
@@ -1184,6 +1502,7 @@ export default function App() {
         headline: item.headline,
         body: item.summary && item.summary !== item.hook ? item.summary : '',
         source: item.source,
+        showVerifiedRssStamp: true,
         warning: '',
         showWarning: false,
       },
@@ -1362,20 +1681,42 @@ export default function App() {
     notify(t.messages.profileDeleted);
   };
 
-  const handleQuickCopyCaption = async () => {
-    const text = generateSocialCaption({
+  const workspaceCaption = useMemo(() => {
+    return generateSocialCaption({
       slides,
       activeIndex: safeActiveIndex,
-      scope: slides.length > 1 ? 'all' : 'active',
+      scope: slides.length > 1 ? captionBoxScope : 'active',
       brand,
       lang,
     });
+  }, [slides, safeActiveIndex, captionBoxScope, brand, lang]);
+
+  const handleQuickCopyCaption = async (overrideText?: string) => {
+    const text =
+      overrideText ??
+      generateSocialCaption({
+        slides,
+        activeIndex: safeActiveIndex,
+        scope: slides.length > 1 ? 'all' : 'active',
+        brand,
+        lang,
+      });
     try {
       await navigator.clipboard.writeText(text);
-      notify(t.messages.captionCopied);
     } catch {
-      notify(t.messages.captionCopied);
+      // Fallback copy via temporary textarea if clipboard permission is restricted
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
     }
+    setCaptionCopiedFlash(true);
+    window.setTimeout(() => setCaptionCopiedFlash(false), 1800);
+    notify(t.messages.captionCopied);
   };
 
   // Export single active slide PNG at selectable quality scale (1x Standard, 2x 2K, 4x Ultra HD)
@@ -1480,6 +1821,84 @@ export default function App() {
     }
   };
 
+  // Batch ZIP export: packs all 1..7 high-res PNG slides + auto-generated caption-and-hashtags.txt
+  const handleDownloadAllSlidesZip = async () => {
+    if (exporting) return;
+    setExporting(true);
+    const offscreen = document.createElement('canvas');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const scaleTag = exportScale > 1 ? `-${exportScale}x` : '';
+
+    try {
+      const [loadedLogo, loadedWmLogo] = await Promise.all([
+        brand.logoUrl ? loadCanvasImage(brand.logoUrl) : Promise.resolve(null),
+        watermark.logoUrl ? loadCanvasImage(watermark.logoUrl) : Promise.resolve(null),
+      ]);
+
+      const entries: Array<{ name: string; data: Uint8Array }> = [];
+
+      for (let i = 0; i < slides.length; i++) {
+        setExportProgress(`ZIP ${i + 1}/${slides.length}`);
+        const sl = slides[i];
+        const slideTheme = config.themes.find((th) => th.id === sl.themeId) || config.themes[0];
+        const loadedBg =
+          sl.background.mode === 'photo' && sl.background.imageUrl
+            ? await loadCanvasImage(sl.background.imageUrl)
+            : null;
+
+        renderNewsCard({
+          canvas: offscreen,
+          aspectRatio,
+          scale: exportScale,
+          layoutId: sl.layoutId,
+          theme: slideTheme,
+          content: sl.content,
+          brand,
+          watermark,
+          background: sl.background,
+          bgImage: loadedBg,
+          logoImage: loadedLogo,
+          watermarkLogoImage: loadedWmLogo,
+          slideIndex: i,
+          totalSlides: slides.length,
+        });
+
+        const pngBytes = await canvasToPngBytes(offscreen);
+        if (!pngBytes) {
+          throw new Error('PNG encoding failed');
+        }
+
+        entries.push({
+          name: `azk-desk-slide-${String(i + 1).padStart(2, '0')}-${aspectRatio}${scaleTag}.png`,
+          data: pngBytes,
+        });
+      }
+
+      const fullCaption = generateSocialCaption({
+        slides,
+        activeIndex: safeActiveIndex,
+        scope: slides.length > 1 ? 'all' : 'active',
+        brand,
+        lang,
+      });
+      entries.push({
+        name: 'caption-and-hashtags.txt',
+        data: new TextEncoder().encode(fullCaption),
+      });
+
+      const zipBlob = createZipBlob(entries);
+      triggerBlobDownload(zipBlob, `azk-desk-carousel-${aspectRatio}${scaleTag}-${stamp}.zip`);
+      notify(t.messages.zipExportSuccess);
+    } catch {
+      notify(t.messages.exportError, 'error');
+    } finally {
+      offscreen.width = 0;
+      offscreen.height = 0;
+      setExporting(false);
+      setExportProgress(null);
+    }
+  };
+
   const handleExportJson = () => {
     const payload: ExportedPresetPayload = {
       type: 'azk-desk-preset',
@@ -1510,33 +1929,7 @@ export default function App() {
   const sanitizeImportedCardContent = (
     rawContent: unknown,
     fallback: CardContent
-  ): CardContent => {
-    if (!rawContent || typeof rawContent !== 'object') return fallback;
-    const c = rawContent as Record<string, unknown>;
-    return {
-      category: sanitizePlainText(c.category, 60, fallback.category),
-      hook: sanitizePlainText(c.hook, 140, fallback.hook),
-      headline: sanitizeMultilineText(c.headline, 320, fallback.headline),
-      body: typeof c.body === 'string' ? sanitizeMultilineText(c.body, 600, '') : fallback.body,
-      source: sanitizePlainText(c.source, 120, fallback.source),
-      credit: sanitizePlainText(c.credit, 120, fallback.credit),
-      warning: sanitizePlainText(c.warning, 160, fallback.warning),
-      showWarning: typeof c.showWarning === 'boolean' ? c.showWarning : fallback.showWarning,
-      headlineSize:
-        typeof c.headlineSize === 'number' && Number.isFinite(c.headlineSize)
-          ? Math.min(110, Math.max(36, Math.round(c.headlineSize)))
-          : fallback.headlineSize,
-      headlineFont:
-        c.headlineFont === 'serif' || c.headlineFont === 'sans'
-          ? c.headlineFont
-          : fallback.headlineFont,
-      textAlign:
-        c.textAlign === 'center' || c.textAlign === 'left' ? c.textAlign : fallback.textAlign,
-      direction:
-        c.direction === 'rtl' ? 'rtl' : c.direction === 'ltr' ? 'ltr' : fallback.direction,
-      typography: mergeTypography(c.typography, fallback.typography),
-    };
-  };
+  ): CardContent => sanitizeCardContent(rawContent, fallback);
 
   const handleImportJsonFile = (file: File) => {
     if (file.size > 5 * 1024 * 1024) {
@@ -1662,7 +2055,14 @@ export default function App() {
   };
 
   const handleRestoreDefaults = () => {
+    try {
+      window.localStorage.removeItem(STORAGE_KEYS.autosavedDraft);
+    } catch {
+      // Ignore storage access restrictions
+    }
     applyDailyConfig(DEFAULT_DAILY_CONFIG, lang);
+    setSlides([createInitialSlide()]);
+    setActiveSlideIndex(0);
     setConfigUrl('/api/daily-config');
     safeWriteStorage(STORAGE_KEYS.configUrl, '/api/daily-config');
     setLastSyncedAt(null);
@@ -1809,7 +2209,10 @@ export default function App() {
                 }
                 storyPresets={config.storyPresets}
                 onApplyStoryPreset={handleApplyStoryPreset}
+                onApplyQuotePreset={handleApplyQuotePreset}
                 onApplyRawNews={handleApplyRawNewsToActiveSlide}
+                watermark={watermark}
+                onChangeWatermark={(patch) => setWatermark((prev) => ({ ...prev, ...patch }))}
                 customFonts={customFonts}
                 onUploadCustomFont={handleUploadCustomFont}
                 onRemoveCustomFont={handleRemoveCustomFont}
@@ -2277,28 +2680,121 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={handleQuickCopyCaption}
+                  onClick={() => handleQuickCopyCaption()}
                   title={t.actions.copyCaption}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 whitespace-nowrap shrink-0"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <Copy className="w-3.5 h-3.5" />
                   <span className="hidden md:inline">{t.actions.copyCaption}</span>
                 </button>
 
                 {slides.length > 1 && (
-                  <button
-                    type="button"
-                    disabled={exporting}
-                    onClick={handleExportAllSlides}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0"
-                  >
-                    <Layers className="w-3.5 h-3.5" />
-                    <span>
-                      {t.actions.exportAllPng} ({slides.length})
-                    </span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      disabled={exporting}
+                      onClick={handleExportAllSlides}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 hover:border-zinc-400 disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>
+                        {t.actions.exportAllPng} ({slides.length})
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={exporting}
+                      onClick={handleDownloadAllSlidesZip}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 hover:opacity-90 disabled:opacity-50 whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      <Archive className="w-3.5 h-3.5" />
+                      <span>
+                        {exporting && exportProgress?.startsWith('ZIP')
+                          ? `${t.actions.exportingZip} ${exportProgress.replace('ZIP ', '')}`
+                          : `${t.actions.downloadZip} (${slides.length})`}
+                      </span>
+                    </button>
+                  </>
                 )}
               </div>
+            </div>
+
+            {/* Auto-Generated Social Caption & Hashtags Box (1-Click Copy in Main Workspace) */}
+            <div className="rounded-xl bg-white dark:bg-[#151922] border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-zinc-100 dark:border-zinc-800/80">
+                <button
+                  type="button"
+                  onClick={() => setCaptionBoxOpen((prev) => !prev)}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200 cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                  <span>{t.canvas.captionDrawerTitle}</span>
+                  {captionBoxOpen ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-zinc-400" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+                  )}
+                </button>
+
+                <div className="flex items-center gap-1.5">
+                  {slides.length > 1 && (
+                    <div className="inline-flex items-center p-0.5 rounded-md bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                      <button
+                        type="button"
+                        onClick={() => setCaptionBoxScope('active')}
+                        className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                          captionBoxScope === 'active'
+                            ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-2xs'
+                            : 'text-zinc-500 dark:text-zinc-400'
+                        }`}
+                      >
+                        {t.brand.captionScopeActive}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCaptionBoxScope('all')}
+                        className={`px-2 py-0.5 text-[11px] font-medium rounded transition-colors cursor-pointer ${
+                          captionBoxScope === 'all'
+                            ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-2xs'
+                            : 'text-zinc-500 dark:text-zinc-400'
+                        }`}
+                      >
+                        {t.brand.captionScopeAll}
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickCopyCaption(workspaceCaption)}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      captionCopiedFlash
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 hover:opacity-90'
+                    }`}
+                  >
+                    {captionCopiedFlash ? (
+                      <Check className="w-3.5 h-3.5" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{captionCopiedFlash ? t.actions.copied : t.actions.copyCaption}</span>
+                  </button>
+                </div>
+              </div>
+
+              {captionBoxOpen && (
+                <div className="p-2.5">
+                  <textarea
+                    readOnly
+                    rows={3}
+                    value={workspaceCaption}
+                    aria-label={t.canvas.captionDrawerTitle}
+                    className="w-full px-2.5 py-2 text-xs leading-relaxed rounded-lg border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 focus:outline-none resize-y"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Quiet Unboxed Technical Metadata Footer + Active Visual License Badge */}
@@ -2355,6 +2851,14 @@ export default function App() {
                 <span>{lang === 'bn' ? activeTheme.nameBn : activeTheme.name}</span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                {draftSavedAt && (
+                  <>
+                    <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                      {t.canvas.draftSaved} ({draftSavedAt})
+                    </span>
+                    <span aria-hidden="true">·</span>
+                  </>
+                )}
                 <span>
                   {showSafeZones
                     ? t.canvas.safeZoneNote
@@ -2364,7 +2868,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAboutOpen(true)}
-                  className="font-medium text-zinc-700 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 underline-offset-2 hover:underline transition-colors"
+                  className="font-medium text-zinc-700 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 underline-offset-2 hover:underline transition-colors cursor-pointer"
                 >
                   {t.about.buttonLabel}
                 </button>

@@ -145,9 +145,12 @@ export interface CardContent {
   hook: string;
   headline: string;
   body: string;
+  speakerName?: string;
+  speakerRole?: string;
   source: string;
   category: string;
   credit: string;
+  showVerifiedRssStamp?: boolean;
   warning: string;
   showWarning: boolean;
   headlineSize: number;
@@ -235,6 +238,7 @@ export interface RssNewsItem {
   source: string;
   category: string;
   publishedAt: string;
+  link?: string;
 }
 
 export interface RssFeedResponse {

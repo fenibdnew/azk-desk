@@ -6,6 +6,7 @@ import {
   Check,
   ClipboardPaste,
   Clock,
+  ExternalLink,
   Globe,
   Layers,
   Lightbulb,
@@ -1530,17 +1531,31 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
                           {item.source}
                         </span>
                       </div>
-                      {timeLabel && (
-                        <span
-                          className={`tabular-nums shrink-0 font-medium ${
-                            meta?.isWithinLastHour
-                              ? 'text-emerald-700 dark:text-emerald-400'
-                              : ''
-                          }`}
-                        >
-                          {timeLabel}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {item.link && (
+                          <a
+                            href={item.link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={item.link}
+                            className="inline-flex items-center gap-1 text-[10px] font-medium text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 transition-colors"
+                          >
+                            <span>{t.news.readSource}</span>
+                            <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                          </a>
+                        )}
+                        {timeLabel && (
+                          <span
+                            className={`tabular-nums shrink-0 font-medium ${
+                              meta?.isWithinLastHour
+                                ? 'text-emerald-700 dark:text-emerald-400'
+                                : ''
+                            }`}
+                          >
+                            {timeLabel}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Local Editorial Signals (Breaking / Trending / High Impact) */}

@@ -299,6 +299,36 @@ function extractXmlTag(block, tagName) {
   return m ? cleanRssPlainText(m[1]) : '';
 }
 
+function extractSafeRssLink(block) {
+  let candidate = extractXmlTag(block, 'link');
+  if (!candidate) {
+    const atomLink =
+      block.match(/<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/i) ||
+      block.match(/<guid\b[^>]*>([\s\S]*?)<\/guid>/i);
+    candidate = atomLink ? cleanRssPlainText(atomLink[1]) : '';
+  }
+  if (!candidate || candidate.length > 512) return undefined;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return undefined;
+    if (parsed.username || parsed.password) return undefined;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      !host ||
+      !host.includes('.') ||
+      host === 'localhost' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      (net.isIP(host) && isPrivateOrReservedIp(host))
+    ) {
+      return undefined;
+    }
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 function parseRssXmlTextOnly(xml, fallbackSource, categoryLabel, prefix) {
   const items = [];
   const seen = new Set();
@@ -338,6 +368,7 @@ function parseRssXmlTextOnly(xml, fallbackSource, categoryLabel, prefix) {
         publishedAt = new Date(parsedTs).toISOString();
       }
     }
+    const safeLink = extractSafeRssLink(raw);
     items.push({
       id: `${prefix}-${i}`,
       headline,
@@ -346,6 +377,7 @@ function parseRssXmlTextOnly(xml, fallbackSource, categoryLabel, prefix) {
       source,
       category: categoryLabel,
       publishedAt,
+      ...(safeLink ? { link: safeLink } : {}),
     });
   }
 

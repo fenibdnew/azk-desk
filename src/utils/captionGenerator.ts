@@ -51,8 +51,20 @@ export function generateSocialCaption(params: {
     }
   } else {
     const c = activeSlide.content;
+    const isQuote = activeSlide.layoutId === 'quote';
+    const speakerName = (c.speakerName || '').trim();
+    const speakerRole = (c.speakerRole || '').trim();
+
     if (c.hook.trim()) lines.push(c.hook.trim());
-    if (c.headline.trim()) lines.push(c.headline.trim());
+    if (c.headline.trim()) {
+      lines.push(isQuote ? `“${c.headline.trim()}”` : c.headline.trim());
+    }
+    if (isQuote && (speakerName || speakerRole)) {
+      const speakerLine = [speakerName ? `— ${speakerName}` : '', speakerRole]
+        .filter(Boolean)
+        .join(', ');
+      if (speakerLine) lines.push(speakerLine);
+    }
     if (c.body.trim()) {
       lines.push('');
       lines.push(c.body.trim());

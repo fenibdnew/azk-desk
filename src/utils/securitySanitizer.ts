@@ -205,6 +205,10 @@ export function sanitizeRssFeedResponse(raw: unknown): RssFeedResponse | null {
     );
     const parsedTs = rawPub ? Date.parse(rawPub) : Number.NaN;
     const publishedAt = !Number.isNaN(parsedTs) ? new Date(parsedTs).toISOString() : '';
+    const safeLink =
+      typeof item.link === 'string' && item.link.length <= 512
+        ? sanitizeCustomFeedUrl(item.link) ?? undefined
+        : undefined;
 
     cleanItems.push({
       id,
@@ -214,6 +218,7 @@ export function sanitizeRssFeedResponse(raw: unknown): RssFeedResponse | null {
       source,
       category,
       publishedAt,
+      ...(safeLink ? { link: safeLink } : {}),
     });
   }
 

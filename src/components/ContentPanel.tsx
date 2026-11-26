@@ -6,7 +6,9 @@ import {
   ChevronDown,
   ClipboardPaste,
   ListFilter,
+  Quote,
   RotateCcw,
+  ShieldCheck,
   Trash2,
   Type,
   Upload,
@@ -26,6 +28,7 @@ import {
   ParsedRawNews,
   StoryPreset,
   TypographySettings,
+  WatermarkSettings,
 } from '../types/studio';
 import { UIStrings } from '../data/i18n';
 import {
@@ -58,7 +61,10 @@ interface ContentPanelProps {
   onChangeScrimOpacity: (val: number) => void;
   storyPresets: StoryPreset[];
   onApplyStoryPreset: (preset: StoryPreset) => void;
+  onApplyQuotePreset: () => void;
   onApplyRawNews: (parsed: ParsedRawNews) => void;
+  watermark: WatermarkSettings;
+  onChangeWatermark: (patch: Partial<WatermarkSettings>) => void;
   onNotify: (msg: string, tone?: 'info' | 'error') => void;
 }
 
@@ -105,7 +111,10 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
   onChangeScrimOpacity,
   storyPresets,
   onApplyStoryPreset,
+  onApplyQuotePreset,
   onApplyRawNews,
+  watermark,
+  onChangeWatermark,
   onNotify,
 }) => {
   const [openPicker, setOpenPicker] = useState<CuratedFieldKey | null>(null);
@@ -213,22 +222,36 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
     <div className="space-y-6">
       {/* Quick Bilingual Story Starters + Inline Paste Raw News Auto-Fill */}
       <div className="space-y-2.5">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
             {t.actions.applyPreset}
           </span>
-          <button
-            type="button"
-            onClick={() => setShowQuickPaste((prev) => !prev)}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-              showQuickPaste
-                ? 'border-red-600 bg-red-600/10 text-red-700 dark:text-red-400'
-                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
-            }`}
-          >
-            <ClipboardPaste className="w-3.5 h-3.5" />
-            <span>{t.content.pasteAutoFillBtn}</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onApplyQuotePreset}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeLayoutId === 'quote'
+                  ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
+              }`}
+            >
+              <Quote className="w-3.5 h-3.5 text-red-600 shrink-0" />
+              <span>{t.actions.quotePresetBtn}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowQuickPaste((prev) => !prev)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                showQuickPaste
+                  ? 'border-red-600 bg-red-600/10 text-red-700 dark:text-red-400'
+                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
+              }`}
+            >
+              <ClipboardPaste className="w-3.5 h-3.5" />
+              <span>{t.content.pasteAutoFillBtn}</span>
+            </button>
+          </div>
         </div>
 
         {showQuickPaste && (
@@ -441,6 +464,52 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
           {renderFieldPicker('bodies', (val) => onChangeContent({ body: val }))}
         </div>
 
+        {/* Dedicated Speaker Name & Role / Designation (shown on Quote Card layout) */}
+        {activeLayoutId === 'quote' && (
+          <div className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 space-y-3">
+            <div className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
+              <Quote className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+              <span>{t.content.quoteCardHint}</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label
+                  htmlFor="field-speaker-name"
+                  className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1"
+                >
+                  {t.content.speakerName}
+                </label>
+                <input
+                  id="field-speaker-name"
+                  type="text"
+                  dir={content.direction}
+                  value={content.speakerName || ''}
+                  onChange={(e) => onChangeContent({ speakerName: e.target.value })}
+                  placeholder={t.content.speakerNamePlaceholder}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-600/30 focus:border-red-600"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="field-speaker-role"
+                  className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1"
+                >
+                  {t.content.speakerRole}
+                </label>
+                <input
+                  id="field-speaker-role"
+                  type="text"
+                  dir={content.direction}
+                  value={content.speakerRole || ''}
+                  onChange={(e) => onChangeContent({ speakerRole: e.target.value })}
+                  placeholder={t.content.speakerRolePlaceholder}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-600/30 focus:border-red-600"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Source & Credit */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -499,6 +568,71 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
         </div>
         {renderFieldPicker('sources', (val) => onChangeContent({ source: val }))}
         {renderFieldPicker('credits', (val) => onChangeContent({ credit: val }))}
+
+        {/* Source & Verified RSS Credit Stamp Toggle + Quick Low-Opacity Watermark Protection */}
+        <div className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/50 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-0.5">
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>{t.content.verifiedRssStamp}</span>
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                {t.content.verifiedRssStampHint}
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={Boolean(content.showVerifiedRssStamp)}
+              aria-label={t.content.verifiedRssStamp}
+              onClick={() =>
+                onChangeContent({ showVerifiedRssStamp: !content.showVerifiedRssStamp })
+              }
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer mt-0.5 ${
+                content.showVerifiedRssStamp
+                  ? 'bg-emerald-600'
+                  : 'bg-zinc-300 dark:bg-zinc-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-xs transition-transform ${
+                  content.showVerifiedRssStamp ? 'translate-x-4.5' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="pt-2.5 border-t border-zinc-200/80 dark:border-zinc-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={watermark.enabled}
+                  onChange={(e) => onChangeWatermark({ enabled: e.target.checked })}
+                  className="w-3.5 h-3.5 rounded border-zinc-300 accent-red-600"
+                />
+                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                  {t.content.watermarkQuickTitle}
+                </span>
+              </label>
+              <span className="text-[11px] font-mono-tabular text-zinc-500 dark:text-zinc-400">
+                {t.content.watermarkQuickOpacity}: {watermark.opacity}%
+              </span>
+            </div>
+            {watermark.enabled && (
+              <input
+                type="range"
+                min={5}
+                max={45}
+                value={Math.min(45, Math.max(5, watermark.opacity))}
+                onChange={(e) => onChangeWatermark({ opacity: Number(e.target.value) })}
+                aria-label={t.content.watermarkQuickOpacity}
+                className="w-full"
+              />
+            )}
+          </div>
+        </div>
 
         {/* Warning */}
         <div>

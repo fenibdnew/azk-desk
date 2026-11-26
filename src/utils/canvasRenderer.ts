@@ -657,11 +657,13 @@ function drawAttributionFooter(
   dividerColor: string,
   metaTypo: LayerTypography,
   direction: TextDirection,
-  scaleFactor = 1
+  scaleFactor = 1,
+  showVerifiedRssStamp = false,
+  isLightSurface = false
 ) {
   const hasSource = source.trim().length > 0;
   const hasCredit = credit.trim().length > 0;
-  if (!hasSource && !hasCredit) return;
+  if (!hasSource && !hasCredit && !showVerifiedRssStamp) return;
 
   const isRtl = direction === 'rtl';
   const metaStack = buildCanvasFontStack(metaTypo.fontFamily);
@@ -680,11 +682,41 @@ function drawAttributionFooter(
   const textY = y + Math.round(sourceSize * metaTypo.lineHeight * 1.15);
   ctx.textBaseline = 'middle';
 
+  let sourceOffset = 0;
+  if (showVerifiedRssStamp) {
+    const stampLabel = '✓ SOURCE & VERIFIED RSS';
+    const stampFontSize = Math.max(11, Math.min(16, Math.round(13 * scaleFactor)));
+    ctx.font = `700 ${stampFontSize}px ${metaStack}`;
+    const labelW = ctx.measureText(stampLabel).width;
+    const padX = Math.round(10 * scaleFactor);
+    const pillW = Math.ceil(labelW + padX * 2);
+    const pillH = Math.ceil(stampFontSize * 1.75);
+    const pillX = isRtl ? x + contentWidth - pillW : x;
+    const pillY = textY - pillH / 2;
+
+    ctx.fillStyle = isLightSurface ? 'rgba(5, 150, 105, 0.14)' : 'rgba(16, 185, 129, 0.2)';
+    drawRoundedRect(ctx, pillX, pillY, pillW, pillH, 6);
+    ctx.fill();
+
+    ctx.strokeStyle = isLightSurface ? 'rgba(5, 150, 105, 0.45)' : 'rgba(52, 211, 153, 0.55)';
+    ctx.lineWidth = 1.5;
+    drawRoundedRect(ctx, pillX, pillY, pillW, pillH, 6);
+    ctx.stroke();
+
+    ctx.fillStyle = isLightSurface ? '#047857' : '#6EE7B7';
+    ctx.textAlign = 'center';
+    ctx.fillText(stampLabel, pillX + pillW / 2, textY + 0.5);
+
+    sourceOffset = pillW + Math.round(12 * scaleFactor);
+  }
+
   if (hasSource) {
+    const maxSourceW = Math.max(80, contentWidth * 0.58 - sourceOffset);
     ctx.font = `${metaTypo.fontWeight} ${sourceSize}px ${metaStack}`;
     ctx.fillStyle = primaryColor;
     ctx.textAlign = isRtl ? 'right' : 'left';
-    ctx.fillText(source.trim(), isRtl ? x + contentWidth : x, textY, contentWidth * 0.56);
+    const sourceX = isRtl ? x + contentWidth - sourceOffset : x + sourceOffset;
+    ctx.fillText(source.trim(), sourceX, textY, maxSourceW);
   }
 
   if (hasCredit) {
@@ -692,7 +724,7 @@ function drawAttributionFooter(
     ctx.font = `${creditWeight} ${creditSize}px ${metaStack}`;
     ctx.fillStyle = mutedColor;
     ctx.textAlign = isRtl ? 'left' : 'right';
-    ctx.fillText(credit.trim(), isRtl ? x : x + contentWidth, textY, contentWidth * 0.42);
+    ctx.fillText(credit.trim(), isRtl ? x : x + contentWidth, textY, contentWidth * 0.38);
   }
 
   ctx.restore();
@@ -897,7 +929,9 @@ export function renderNewsCard(params: RenderCardParams): void {
         isLightTheme ? 'rgba(17,24,39,0.16)' : 'rgba(255,255,255,0.18)',
         metaTypo,
         direction,
-        typeScale
+        typeScale,
+        Boolean(content.showVerifiedRssStamp),
+        isLightTheme
       );
 
       drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
@@ -1018,7 +1052,9 @@ export function renderNewsCard(params: RenderCardParams): void {
       isLightTheme ? 'rgba(17,24,39,0.16)' : 'rgba(255,255,255,0.18)',
       metaTypo,
       direction,
-      typeScale
+      typeScale,
+      Boolean(content.showVerifiedRssStamp),
+      isLightTheme
     );
 
     drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
@@ -1170,7 +1206,9 @@ export function renderNewsCard(params: RenderCardParams): void {
       'rgba(255,255,255,0.22)',
       metaTypo,
       direction,
-      typeScale
+      typeScale,
+      Boolean(content.showVerifiedRssStamp),
+      false
     );
 
     drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
@@ -1186,13 +1224,13 @@ export function renderNewsCard(params: RenderCardParams): void {
       width,
       height,
       theme.scrimColor,
-      Math.max(40, background.scrimOpacity),
+      Math.max(44, background.scrimOpacity),
       scrimStyle === 'bottom' ? 'vignette' : scrimStyle,
       scrimAngle
     );
     drawWatermarkLayer(ctx, width, height, watermark, watermarkLogoImage || logoImage, false);
 
-    const ruleY = isLandscape ? 118 : isStory ? 290 : 188;
+    const ruleY = isLandscape ? 114 : isStory ? 286 : 182;
     ctx.strokeStyle = rgba(theme.accent, 0.85);
     ctx.lineWidth = 4;
     ctx.beginPath();
@@ -1203,39 +1241,53 @@ export function renderNewsCard(params: RenderCardParams): void {
     const anchorX = getAnchorX(marginX + 20, width - marginX - 20);
     const usableW = contentWidth - 40;
     const hasBody = content.body.trim().length > 0;
+    const speakerName = (content.speakerName || '').trim();
+    const speakerRole = (content.speakerRole || '').trim();
+    const hasSpeaker = speakerName.length > 0 || speakerRole.length > 0;
+
+    const quoteMarkSize = Math.round((isLandscape ? 88 : 112) * typeScale);
+    const quoteMarkH = Math.round(quoteMarkSize * 0.62);
 
     const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
     const hlSize = Math.min(
-      Math.round((hasBody ? 68 : 76) * typeScale),
-      Math.max(30, baseHl - (hasBody ? 6 : 2))
+      Math.round((hasBody || hasSpeaker ? 64 : 74) * typeScale),
+      Math.max(30, baseHl - (hasBody || hasSpeaker ? 6 : 2))
     );
     const hlLineHeight = Math.round(hlSize * hlTypo.lineHeight);
     ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
-    const maxHlLines = isLandscape ? (hasBody ? 3 : 4) : isStory ? 7 : hasBody ? 4 : 6;
+    const maxHlLines = isLandscape ? (hasBody ? 3 : 4) : isStory ? 6 : hasBody ? 4 : 5;
     const hlLines = wrapText(ctx, content.headline, usableW, maxHlLines);
 
-    const bdSize = Math.max(15, Math.min(40, Math.round(bodyTypo.fontSize * typeScale)));
+    const bdSize = Math.max(15, Math.min(36, Math.round(bodyTypo.fontSize * typeScale)));
     const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
     ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
-    const bodyLines = hasBody ? wrapText(ctx, content.body, usableW, isLandscape ? 2 : 4) : [];
+    const bodyLines = hasBody ? wrapText(ctx, content.body, usableW, isLandscape ? 2 : 3) : [];
 
-    const hkSize = Math.max(15, Math.min(36, Math.round(hookTypo.fontSize * typeScale)));
+    const hkSize = Math.max(15, Math.min(34, Math.round(hookTypo.fontSize * typeScale)));
     const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
     ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
     const hookLines = content.hook.trim() ? wrapText(ctx, content.hook.trim(), usableW, 2) : [];
 
-    const catH = content.category.trim() ? Math.round(60 * typeScale) : 0;
-    const warnH = warningActive ? Math.round(62 * typeScale) : 0;
+    const speakerNameSize = Math.max(18, Math.round(28 * typeScale));
+    const speakerRoleSize = Math.max(14, Math.round(20 * typeScale));
+    const speakerH = hasSpeaker
+      ? 24 + (speakerName ? Math.round(speakerNameSize * 1.25) : 0) + (speakerRole ? Math.round(speakerRoleSize * 1.3) : 0)
+      : 0;
+
+    const catH = content.category.trim() ? Math.round(58 * typeScale) : 0;
+    const warnH = warningActive ? Math.round(58 * typeScale) : 0;
 
     const totalH =
       catH +
-      (hookLines.length > 0 ? hookLines.length * hkLineH + 16 : 0) +
+      quoteMarkH +
+      (hookLines.length > 0 ? hookLines.length * hkLineH + 14 : 0) +
       hlLines.length * hlLineHeight +
-      (bodyLines.length > 0 ? bodyLines.length * bdLineH + 18 : 0) +
+      (bodyLines.length > 0 ? bodyLines.length * bdLineH + 16 : 0) +
+      speakerH +
       warnH;
 
-    const availableBottom = height - footerOffset - 24;
-    const minQuoteY = ruleY + 26;
+    const availableBottom = height - footerOffset - 22;
+    const minQuoteY = ruleY + 20;
     let y = Math.max(minQuoteY, (availableBottom + minQuoteY - totalH) / 2);
 
     if (content.category.trim()) {
@@ -1254,6 +1306,16 @@ export function renderNewsCard(params: RenderCardParams): void {
       y += catH;
     }
 
+    // Oversized editorial opening quote glyph (“)
+    ctx.save();
+    ctx.font = `700 ${quoteMarkSize}px "Fraunces", "Playfair Display", Georgia, serif`;
+    ctx.fillStyle = theme.accent;
+    ctx.textAlign = resolvedAlign;
+    ctx.textBaseline = 'top';
+    ctx.fillText('“', anchorX, y - Math.round(quoteMarkSize * 0.14));
+    ctx.restore();
+    y += quoteMarkH;
+
     if (hookLines.length > 0) {
       ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
       ctx.fillStyle = rgba('#FFFFFF', 0.82);
@@ -1263,7 +1325,7 @@ export function renderNewsCard(params: RenderCardParams): void {
         ctx.fillText(line, anchorX, y);
         y += hkLineH;
       }
-      y += 14;
+      y += 12;
     }
 
     ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
@@ -1276,7 +1338,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     }
 
     if (bodyLines.length > 0) {
-      y += 16;
+      y += 14;
       ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
       ctx.fillStyle = rgba('#FFFFFF', 0.86);
       ctx.textAlign = resolvedAlign;
@@ -1287,8 +1349,43 @@ export function renderNewsCard(params: RenderCardParams): void {
       }
     }
 
+    if (hasSpeaker) {
+      y += 22;
+      // Short accent bar above speaker attribution
+      ctx.save();
+      ctx.fillStyle = theme.accent;
+      const barW = Math.round(48 * typeScale);
+      const barX =
+        resolvedAlign === 'center'
+          ? anchorX - barW / 2
+          : resolvedAlign === 'right'
+            ? anchorX - barW
+            : anchorX;
+      ctx.fillRect(barX, y, barW, 4);
+      ctx.restore();
+      y += 14;
+
+      if (speakerName) {
+        ctx.font = `700 ${speakerNameSize}px ${hookStack}`;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = resolvedAlign;
+        ctx.textBaseline = 'top';
+        ctx.fillText(`— ${speakerName}`, anchorX, y, usableW);
+        y += Math.round(speakerNameSize * 1.25);
+      }
+
+      if (speakerRole) {
+        ctx.font = `500 ${speakerRoleSize}px ${bodyStack}`;
+        ctx.fillStyle = rgba('#E2E8F0', 0.88);
+        ctx.textAlign = resolvedAlign;
+        ctx.textBaseline = 'top';
+        ctx.fillText(speakerRole, anchorX, y, usableW);
+        y += Math.round(speakerRoleSize * 1.3);
+      }
+    }
+
     if (warningActive) {
-      y += 16;
+      y += 14;
       drawBadge(
         ctx,
         `⚠ ${content.warning.trim()}`,
@@ -1315,7 +1412,9 @@ export function renderNewsCard(params: RenderCardParams): void {
       'rgba(255,255,255,0.2)',
       metaTypo,
       direction,
-      typeScale
+      typeScale,
+      Boolean(content.showVerifiedRssStamp),
+      false
     );
 
     drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
@@ -1470,7 +1569,9 @@ export function renderNewsCard(params: RenderCardParams): void {
     'rgba(255,255,255,0.24)',
     metaTypo,
     direction,
-    typeScale
+    typeScale,
+    Boolean(content.showVerifiedRssStamp),
+    false
   );
 
   drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);

@@ -459,6 +459,7 @@ interface RssNewsItem {
   source: string;
   category: string;
   publishedAt: string;
+  link?: string;
 }
 
 interface RssFeedSource {
@@ -767,7 +768,38 @@ function buildSmartHook(
   };
 }
 
-// Strictly extracts text metadata ONLY (headline, short summary/hook, source name, publish date).
+function extractSafeRssLink(block: string): string | undefined {
+  let candidate = extractXmlTag(block, 'link');
+  if (!candidate) {
+    const atomLink =
+      block.match(/<link\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/i) ||
+      block.match(/<guid\b[^>]*>([\s\S]*?)<\/guid>/i);
+    candidate = atomLink ? atomLink[1] : '';
+  }
+  const cleaned = cleanRssPlainText(candidate);
+  if (!cleaned || cleaned.length > 512) return undefined;
+  try {
+    const parsed = new URL(cleaned);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return undefined;
+    if (parsed.username || parsed.password) return undefined;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      !host ||
+      !host.includes('.') ||
+      host === 'localhost' ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal') ||
+      (net.isIP(host) && isPrivateOrBlockedIp(host))
+    ) {
+      return undefined;
+    }
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+// Strictly extracts text metadata ONLY (headline, short summary/hook, source name, publish date, safe link).
 // Never extracts or returns article images, thumbnails, or enclosures.
 function parseRssXmlTextOnly(
   xml: string,
@@ -835,6 +867,7 @@ function parseRssXmlTextOnly(
       }
     }
 
+    const safeLink = extractSafeRssLink(block);
     const { hook, summary } = buildSmartHook(headline, description, country, category, lang);
 
     items.push({
@@ -845,6 +878,7 @@ function parseRssXmlTextOnly(
       source: source || defaultSource,
       category: categoryLabel,
       publishedAt,
+      ...(safeLink ? { link: safeLink } : {}),
     });
   }
 
