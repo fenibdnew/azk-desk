@@ -695,16 +695,24 @@ function decodeHtmlEntities(input: string): string {
 
 function cleanRssPlainText(raw: string): string {
   if (!raw) return '';
-  let text = raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1');
+  let text = raw
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ');
   // First decode XML-escaped HTML (common in Google News descriptions)
   text = decodeHtmlEntities(text);
-  // Remove script/style blocks and all HTML tags (including any img/a/font tags)
+  // Remove executable/embed blocks and all HTML tags (including any img/a/font tags)
   text = text
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, ' ')
+    .replace(/<object[\s\S]*?<\/object>/gi, ' ')
     .replace(/<[^>]*>/g, ' ');
-  // Second decode pass for double-encoded entities, then strip stray angle brackets
-  text = decodeHtmlEntities(text).replace(/[<>]/g, '');
+  // Second decode pass for double-encoded entities, strip stray angle brackets and dangerous URI schemes
+  text = decodeHtmlEntities(text)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[<>]/g, '')
+    .replace(/\b(?:javascript|vbscript)\s*:/gi, '')
+    .replace(/\bdata\s*:\s*text\/html/gi, '');
   return text.replace(/\s+/g, ' ').trim();
 }
 
@@ -930,10 +938,27 @@ interface CachedRssPayload {
 const RSS_CACHE = new Map<string, CachedRssPayload>();
 const RSS_CACHE_TTL_MS = 45 * 1000;
 
+const DANGEROUS_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function safeJsonParse(text: string): unknown {
+  return JSON.parse(text, (key, value) => {
+    if (DANGEROUS_PROTO_KEYS.has(key)) return undefined;
+    return value;
+  });
+}
+
 async function startServer() {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
+
+  // Baseline security headers across all API and web responses
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+    next();
+  });
 
   // Live daily JSON endpoint
   app.get('/api/daily-config', (_req, res) => {
@@ -972,7 +997,7 @@ async function startServer() {
         return;
       }
 
-      const parsed = JSON.parse(text);
+      const parsed = safeJsonParse(text);
       res.setHeader('Cache-Control', 'no-store');
       res.json(parsed);
     } catch (err) {

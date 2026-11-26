@@ -1,3 +1,5 @@
+import { sanitizePlainText } from '../utils/securitySanitizer';
+
 export type Language = 'en' | 'bn';
 
 export type TextDirection = 'ltr' | 'rtl';
@@ -269,17 +271,43 @@ export interface ExportedPresetPayload {
   };
 }
 
+function isSafeSvgBase64DataUrl(trimmed: string): boolean {
+  const match = trimmed.match(/^data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) return false;
+  try {
+    const decoded = atob(match[1]);
+    if (/<script\b/i.test(decoded)) return false;
+    if (/<foreignobject\b/i.test(decoded)) return false;
+    if (/\b(?:javascript|vbscript)\s*:/i.test(decoded)) return false;
+    if (/\bon[a-z]+\s*=/i.test(decoded)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function isSafeMediaUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
-  if (!trimmed) return false;
-  if (trimmed.startsWith('/src/assets/')) return true;
-  if (/^data:image\/(png|jpeg|jpg|webp|gif|avif|svg\+xml);base64,[A-Za-z0-9+/=]+$/i.test(trimmed)) {
+  if (!trimmed || trimmed.length > 15_000_000) return false;
+  if ((trimmed.startsWith('/src/assets/') || trimmed.startsWith('/assets/')) && !trimmed.includes('..')) {
     return true;
+  }
+  if (/^data:image\/(png|jpeg|jpg|webp|gif|avif);base64,[A-Za-z0-9+/=]+$/i.test(trimmed)) {
+    return true;
+  }
+  if (/^data:image\/svg\+xml;base64,/i.test(trimmed)) {
+    return isSafeSvgBase64DataUrl(trimmed);
   }
   try {
     const parsed = new URL(trimmed);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    if (parsed.username || parsed.password) return false;
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
@@ -292,8 +320,8 @@ export function isValidHexColor(val: unknown): val is string {
 function sanitizeStringArray(input: unknown, fallback: string[], maxLen = 220): string[] {
   if (!Array.isArray(input)) return fallback;
   const cleaned = input
-    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .map((item) => item.trim().slice(0, maxLen))
+    .map((item) => sanitizePlainText(item, maxLen))
+    .filter((item) => item.length > 0)
     .slice(0, 30);
   return cleaned.length > 0 ? cleaned : fallback;
 }
@@ -304,20 +332,9 @@ export function validateAndMergeDailyConfig(raw: unknown, fallback: DailyConfig)
   }
   const obj = raw as Record<string, unknown>;
 
-  const brandName =
-    typeof obj.brandName === 'string' && obj.brandName.trim()
-      ? obj.brandName.trim().slice(0, 80)
-      : fallback.brandName;
-
-  const brandNameBn =
-    typeof obj.brandNameBn === 'string' && obj.brandNameBn.trim()
-      ? obj.brandNameBn.trim().slice(0, 80)
-      : fallback.brandNameBn;
-
-  const brandHandle =
-    typeof obj.brandHandle === 'string' && obj.brandHandle.trim()
-      ? obj.brandHandle.trim().slice(0, 60)
-      : fallback.brandHandle;
+  const brandName = sanitizePlainText(obj.brandName, 80, fallback.brandName);
+  const brandNameBn = sanitizePlainText(obj.brandNameBn, 80, fallback.brandNameBn);
+  const brandHandle = sanitizePlainText(obj.brandHandle, 60, fallback.brandHandle);
 
   const logoUrl =
     typeof obj.logoUrl === 'string' && (obj.logoUrl === '' || isSafeMediaUrl(obj.logoUrl))
@@ -339,10 +356,7 @@ export function validateAndMergeDailyConfig(raw: unknown, fallback: DailyConfig)
     enabled: typeof rawWm.enabled === 'boolean' ? rawWm.enabled : fallback.watermark.enabled,
     source:
       rawWm.source === 'text' || rawWm.source === 'logo' ? rawWm.source : fallback.watermark.source,
-    text:
-      typeof rawWm.text === 'string' && rawWm.text.trim()
-        ? rawWm.text.trim().slice(0, 80)
-        : fallback.watermark.text,
+    text: sanitizePlainText(rawWm.text, 80, fallback.watermark.text),
     logoUrl:
       typeof rawWm.logoUrl === 'string' && (rawWm.logoUrl === '' || isSafeMediaUrl(rawWm.logoUrl))
         ? rawWm.logoUrl.trim()
@@ -372,17 +386,19 @@ export function validateAndMergeDailyConfig(raw: unknown, fallback: DailyConfig)
     for (const t of obj.themes) {
       if (!t || typeof t !== 'object') continue;
       const item = t as Record<string, unknown>;
+      const cleanId = sanitizePlainText(item.id, 40);
+      const cleanName = sanitizePlainText(item.name, 50);
       if (
-        typeof item.id === 'string' &&
-        typeof item.name === 'string' &&
+        cleanId &&
+        cleanName &&
         isValidHexColor(item.accent) &&
         isValidHexColor(item.background) &&
         isValidHexColor(item.textPrimary)
       ) {
         validThemes.push({
-          id: item.id.slice(0, 40),
-          name: item.name.slice(0, 50),
-          nameBn: typeof item.nameBn === 'string' ? item.nameBn.slice(0, 50) : item.name.slice(0, 50),
+          id: cleanId,
+          name: cleanName,
+          nameBn: sanitizePlainText(item.nameBn, 50, cleanName),
           accent: item.accent,
           background: item.background,
           backgroundSecondary: isValidHexColor(item.backgroundSecondary)
@@ -410,14 +426,14 @@ export function validateAndMergeDailyConfig(raw: unknown, fallback: DailyConfig)
     for (const lp of obj.layoutPresets) {
       if (!lp || typeof lp !== 'object') continue;
       const item = lp as Record<string, unknown>;
-      if (validLayoutIds.includes(item.id as CardLayoutId) && typeof item.name === 'string') {
+      const cleanName = sanitizePlainText(item.name, 40);
+      if (validLayoutIds.includes(item.id as CardLayoutId) && cleanName) {
         validLayouts.push({
           id: item.id as CardLayoutId,
-          name: item.name.slice(0, 40),
-          nameBn: typeof item.nameBn === 'string' ? item.nameBn.slice(0, 40) : item.name.slice(0, 40),
-          description: typeof item.description === 'string' ? item.description.slice(0, 100) : '',
-          descriptionBn:
-            typeof item.descriptionBn === 'string' ? item.descriptionBn.slice(0, 100) : '',
+          name: cleanName,
+          nameBn: sanitizePlainText(item.nameBn, 40, cleanName),
+          description: sanitizePlainText(item.description, 100),
+          descriptionBn: sanitizePlainText(item.descriptionBn, 100),
         });
       }
     }
@@ -463,27 +479,28 @@ export function validateAndMergeDailyConfig(raw: unknown, fallback: DailyConfig)
     for (const sp of obj.storyPresets) {
       if (!sp || typeof sp !== 'object') continue;
       const item = sp as Record<string, unknown>;
-      if (
-        typeof item.id === 'string' &&
-        (item.lang === 'en' || item.lang === 'bn') &&
-        typeof item.headline === 'string'
-      ) {
+      const cleanId = sanitizePlainText(item.id, 40);
+      const cleanHeadline = sanitizePlainText(item.headline, 240);
+      if (cleanId && (item.lang === 'en' || item.lang === 'bn') && cleanHeadline) {
         validStories.push({
-          id: item.id.slice(0, 40),
+          id: cleanId,
           lang: item.lang,
-          label: typeof item.label === 'string' ? item.label.slice(0, 50) : item.id,
-          category: typeof item.category === 'string' ? item.category.slice(0, 40) : '',
-          hook: typeof item.hook === 'string' ? item.hook.slice(0, 100) : '',
-          headline: item.headline.slice(0, 240),
-          body: typeof item.body === 'string' ? item.body.slice(0, 260) : '',
-          source: typeof item.source === 'string' ? item.source.slice(0, 100) : '',
-          credit: typeof item.credit === 'string' ? item.credit.slice(0, 100) : '',
-          warning: typeof item.warning === 'string' ? item.warning.slice(0, 120) : '',
-          themeId: typeof item.themeId === 'string' ? item.themeId : themes[0].id,
+          label: sanitizePlainText(item.label, 50, cleanId),
+          category: sanitizePlainText(item.category, 40),
+          hook: sanitizePlainText(item.hook, 100),
+          headline: cleanHeadline,
+          body: sanitizePlainText(item.body, 260),
+          source: sanitizePlainText(item.source, 100),
+          credit: sanitizePlainText(item.credit, 100),
+          warning: sanitizePlainText(item.warning, 120),
+          themeId: sanitizePlainText(item.themeId, 40, themes[0].id),
           layoutId: validLayoutIds.includes(item.layoutId as CardLayoutId)
             ? (item.layoutId as CardLayoutId)
             : 'editorial',
-          backdropId: typeof item.backdropId === 'string' ? item.backdropId : undefined,
+          backdropId:
+            typeof item.backdropId === 'string'
+              ? sanitizePlainText(item.backdropId, 40) || undefined
+              : undefined,
         });
       }
     }
@@ -493,14 +510,8 @@ export function validateAndMergeDailyConfig(raw: unknown, fallback: DailyConfig)
   }
 
   return {
-    version:
-      typeof obj.version === 'string' && obj.version.trim()
-        ? obj.version.trim().slice(0, 24)
-        : fallback.version,
-    editionDate:
-      typeof obj.editionDate === 'string' && obj.editionDate.trim()
-        ? obj.editionDate.trim().slice(0, 32)
-        : new Date().toISOString().slice(0, 10),
+    version: sanitizePlainText(obj.version, 24, fallback.version),
+    editionDate: sanitizePlainText(obj.editionDate, 32, new Date().toISOString().slice(0, 10)),
     brandName,
     brandNameBn,
     brandHandle,

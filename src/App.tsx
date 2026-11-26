@@ -53,6 +53,13 @@ import {
   loadCustomFontFromFile,
   registerCustomFontAsset,
 } from './utils/fontManager';
+import {
+  safeJsonParse,
+  sanitizeFontFamilyName,
+  sanitizeMultilineText,
+  sanitizePlainText,
+  sanitizeRemoteConfigUrl,
+} from './utils/securitySanitizer';
 import { ContentPanel } from './components/ContentPanel';
 import { RssNewsPanel } from './components/RssNewsPanel';
 import { BrandWatermarkPanel } from './components/BrandWatermarkPanel';
@@ -98,7 +105,7 @@ function loadInitialDailyConfig(): DailyConfig {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEYS.cachedConfig);
     if (!raw) return DEFAULT_DAILY_CONFIG;
-    return validateAndMergeDailyConfig(JSON.parse(raw), DEFAULT_DAILY_CONFIG);
+    return validateAndMergeDailyConfig(safeJsonParse(raw), DEFAULT_DAILY_CONFIG);
   } catch {
     return DEFAULT_DAILY_CONFIG;
   }
@@ -108,7 +115,7 @@ function loadSavedBrandProfiles(): SavedBrandProfile[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEYS.brandProfiles);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed = safeJsonParse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter(
@@ -120,6 +127,30 @@ function loadSavedBrandProfiles(): SavedBrandProfile[] {
           Boolean(item.brand) &&
           Boolean(item.watermark)
       )
+      .map((item) => ({
+        ...item,
+        id: sanitizePlainText(item.id, 60, `profile-${Date.now()}`),
+        name: sanitizePlainText(item.name, 60, 'Brand Profile'),
+        brand: {
+          ...item.brand,
+          brandName: sanitizePlainText(item.brand.brandName, 80, 'AZK DESK'),
+          brandHandle: sanitizePlainText(item.brand.brandHandle, 60, '@azkdesk'),
+          logoUrl:
+            typeof item.brand.logoUrl === 'string' &&
+            (item.brand.logoUrl === '' || isSafeMediaUrl(item.brand.logoUrl))
+              ? item.brand.logoUrl
+              : '',
+        },
+        watermark: {
+          ...item.watermark,
+          text: sanitizePlainText(item.watermark.text, 80, '@azkdesk'),
+          logoUrl:
+            typeof item.watermark.logoUrl === 'string' &&
+            (item.watermark.logoUrl === '' || isSafeMediaUrl(item.watermark.logoUrl))
+              ? item.watermark.logoUrl
+              : '',
+        },
+      }))
       .slice(0, 15);
   } catch {
     return [];
@@ -130,7 +161,7 @@ function loadSavedCustomFonts(): CustomFontAsset[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEYS.customFonts);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed = safeJsonParse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter(
@@ -141,8 +172,16 @@ function loadSavedCustomFonts(): CustomFontAsset[] {
           typeof item.name === 'string' &&
           typeof item.family === 'string' &&
           typeof item.dataUrl === 'string' &&
-          item.dataUrl.startsWith('data:')
+          /^data:(?:font\/|application\/(?:font-|octet-stream|x-font|vnd\.ms-fontobject))/i.test(
+            item.dataUrl
+          )
       )
+      .map((item) => ({
+        ...item,
+        id: sanitizePlainText(item.id, 60, `font-${Date.now()}`),
+        name: sanitizePlainText(item.name, 80, 'Custom Font'),
+        family: sanitizeFontFamilyName(item.family, 'CustomFont'),
+      }))
       .slice(0, 8);
   } catch {
     return [];
@@ -158,14 +197,40 @@ function cloneTypography(typography: TypographySettings): TypographySettings {
   };
 }
 
+function sanitizeLayerTypography(
+  rawLayer: unknown,
+  fallback: TypographySettings['headline'],
+  minSize: number,
+  maxSize: number
+): TypographySettings['headline'] {
+  if (!rawLayer || typeof rawLayer !== 'object') return { ...fallback };
+  const layer = rawLayer as Record<string, unknown>;
+  const validWeights = new Set([400, 500, 600, 700]);
+  return {
+    fontFamily: sanitizeFontFamilyName(layer.fontFamily, fallback.fontFamily),
+    fontWeight:
+      typeof layer.fontWeight === 'number' && validWeights.has(layer.fontWeight)
+        ? (layer.fontWeight as 400 | 500 | 600 | 700)
+        : fallback.fontWeight,
+    fontSize:
+      typeof layer.fontSize === 'number' && Number.isFinite(layer.fontSize)
+        ? Math.min(maxSize, Math.max(minSize, Math.round(layer.fontSize)))
+        : fallback.fontSize,
+    lineHeight:
+      typeof layer.lineHeight === 'number' && Number.isFinite(layer.lineHeight)
+        ? Math.min(2.2, Math.max(0.95, Number(layer.lineHeight.toFixed(2))))
+        : fallback.lineHeight,
+  };
+}
+
 function mergeTypography(raw: unknown, fallback = createDefaultTypography()): TypographySettings {
   if (!raw || typeof raw !== 'object') return cloneTypography(fallback);
   const src = raw as Partial<TypographySettings>;
   return {
-    headline: { ...fallback.headline, ...(src.headline && typeof src.headline === 'object' ? src.headline : {}) },
-    hook: { ...fallback.hook, ...(src.hook && typeof src.hook === 'object' ? src.hook : {}) },
-    body: { ...fallback.body, ...(src.body && typeof src.body === 'object' ? src.body : {}) },
-    meta: { ...fallback.meta, ...(src.meta && typeof src.meta === 'object' ? src.meta : {}) },
+    headline: sanitizeLayerTypography(src.headline, fallback.headline, 36, 110),
+    hook: sanitizeLayerTypography(src.hook, fallback.hook, 16, 48),
+    body: sanitizeLayerTypography(src.body, fallback.body, 18, 52),
+    meta: sanitizeLayerTypography(src.meta, fallback.meta, 14, 40),
   };
 }
 
@@ -269,12 +334,45 @@ function sanitizeImportedBackground(
       typeof b.tintOpacity === 'number'
         ? Math.min(65, Math.max(0, Math.round(b.tintOpacity)))
         : fallback.tintOpacity,
-    procedural: {
-      ...fallback.procedural,
-      ...((b.procedural && typeof b.procedural === 'object'
+    procedural: (() => {
+      const rawProc = (b.procedural && typeof b.procedural === 'object'
         ? b.procedural
-        : {}) as Partial<BackgroundSettings['procedural']>),
-    },
+        : {}) as Record<string, unknown>;
+      const validPatterns: BackgroundSettings['procedural']['pattern'][] = [
+        'gradient',
+        'grid',
+        'dots',
+        'stripes',
+        'radial',
+      ];
+      return {
+        pattern: validPatterns.includes(
+          rawProc.pattern as BackgroundSettings['procedural']['pattern']
+        )
+          ? (rawProc.pattern as BackgroundSettings['procedural']['pattern'])
+          : fallback.procedural.pattern,
+        colorA:
+          typeof rawProc.colorA === 'string' && /^#[0-9a-fA-F]{6}$/.test(rawProc.colorA)
+            ? rawProc.colorA
+            : fallback.procedural.colorA,
+        colorB:
+          typeof rawProc.colorB === 'string' && /^#[0-9a-fA-F]{6}$/.test(rawProc.colorB)
+            ? rawProc.colorB
+            : fallback.procedural.colorB,
+        angle:
+          typeof rawProc.angle === 'number' && Number.isFinite(rawProc.angle)
+            ? Math.min(360, Math.max(0, Math.round(rawProc.angle)))
+            : fallback.procedural.angle,
+        patternOpacity:
+          typeof rawProc.patternOpacity === 'number' && Number.isFinite(rawProc.patternOpacity)
+            ? Math.min(100, Math.max(0, Math.round(rawProc.patternOpacity)))
+            : fallback.procedural.patternOpacity,
+        patternScale:
+          typeof rawProc.patternScale === 'number' && Number.isFinite(rawProc.patternScale)
+            ? Math.min(140, Math.max(16, Math.round(rawProc.patternScale)))
+            : fallback.procedural.patternScale,
+      };
+    })(),
   };
 }
 
@@ -635,7 +733,13 @@ export default function App() {
         }
         return;
       }
-      const target = urlToFetch.trim() || '/api/daily-config';
+      const target = sanitizeRemoteConfigUrl(urlToFetch);
+      if (!target) {
+        if (!silent) {
+          notify(UI_STRINGS[lang].messages.syncFallback, 'error');
+        }
+        return;
+      }
       setSyncing(true);
       try {
         let fetchTarget = target;
@@ -649,7 +753,11 @@ export default function App() {
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
-        const json = await res.json();
+        const rawTextResp = await res.text();
+        if (rawTextResp.length > 2 * 1024 * 1024) {
+          throw new Error('Config payload too large');
+        }
+        const json = safeJsonParse(rawTextResp);
         const merged = validateAndMergeDailyConfig(json, DEFAULT_DAILY_CONFIG);
         applyDailyConfig(merged, lang);
         setLastSyncedAt(
@@ -1230,11 +1338,46 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  const sanitizeImportedCardContent = (
+    rawContent: unknown,
+    fallback: CardContent
+  ): CardContent => {
+    if (!rawContent || typeof rawContent !== 'object') return fallback;
+    const c = rawContent as Record<string, unknown>;
+    return {
+      category: sanitizePlainText(c.category, 60, fallback.category),
+      hook: sanitizePlainText(c.hook, 140, fallback.hook),
+      headline: sanitizeMultilineText(c.headline, 320, fallback.headline),
+      body: typeof c.body === 'string' ? sanitizeMultilineText(c.body, 600, '') : fallback.body,
+      source: sanitizePlainText(c.source, 120, fallback.source),
+      credit: sanitizePlainText(c.credit, 120, fallback.credit),
+      warning: sanitizePlainText(c.warning, 160, fallback.warning),
+      showWarning: typeof c.showWarning === 'boolean' ? c.showWarning : fallback.showWarning,
+      headlineSize:
+        typeof c.headlineSize === 'number' && Number.isFinite(c.headlineSize)
+          ? Math.min(110, Math.max(36, Math.round(c.headlineSize)))
+          : fallback.headlineSize,
+      headlineFont:
+        c.headlineFont === 'serif' || c.headlineFont === 'sans'
+          ? c.headlineFont
+          : fallback.headlineFont,
+      textAlign:
+        c.textAlign === 'center' || c.textAlign === 'left' ? c.textAlign : fallback.textAlign,
+      direction:
+        c.direction === 'rtl' ? 'rtl' : c.direction === 'ltr' ? 'ltr' : fallback.direction,
+      typography: mergeTypography(c.typography, fallback.typography),
+    };
+  };
+
   const handleImportJsonFile = (file: File) => {
+    if (file.size > 5 * 1024 * 1024) {
+      notify(t.messages.importError, 'error');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const raw = JSON.parse(String(reader.result || ''));
+        const raw = safeJsonParse<Record<string, unknown>>(String(reader.result || ''));
         if (
           raw &&
           typeof raw === 'object' &&
@@ -1244,68 +1387,60 @@ export default function App() {
           const validatedConfig = validateAndMergeDailyConfig(raw.config, DEFAULT_DAILY_CONFIG);
           applyDailyConfig(validatedConfig, lang);
           if (raw.card && typeof raw.card === 'object') {
-            const c = raw.card;
+            const c = raw.card as Record<string, unknown>;
             if (ALL_ASPECT_RATIOS.includes(c.aspectRatio as AspectRatio)) {
               setAspectRatio(c.aspectRatio as AspectRatio);
             }
             if (c.brand && typeof c.brand === 'object') {
+              const b = c.brand as Record<string, unknown>;
               const safeLogoUrl =
-                typeof c.brand.logoUrl === 'string' &&
-                (c.brand.logoUrl === '' || isSafeMediaUrl(c.brand.logoUrl))
-                  ? c.brand.logoUrl
+                typeof b.logoUrl === 'string' &&
+                (b.logoUrl === '' || isSafeMediaUrl(b.logoUrl))
+                  ? b.logoUrl
                   : '';
               setBrand((prev) => ({
                 ...prev,
-                brandName:
-                  typeof c.brand.brandName === 'string'
-                    ? c.brand.brandName.slice(0, 80)
-                    : prev.brandName,
-                brandHandle:
-                  typeof c.brand.brandHandle === 'string'
-                    ? c.brand.brandHandle.slice(0, 60)
-                    : prev.brandHandle,
+                brandName: sanitizePlainText(b.brandName, 80, prev.brandName),
+                brandHandle: sanitizePlainText(b.brandHandle, 60, prev.brandHandle),
                 showBrandHandle:
-                  typeof c.brand.showBrandHandle === 'boolean'
-                    ? c.brand.showBrandHandle
+                  typeof b.showBrandHandle === 'boolean'
+                    ? b.showBrandHandle
                     : prev.showBrandHandle,
                 logoUrl: safeLogoUrl,
                 logoSize:
-                  typeof c.brand.logoSize === 'number'
-                    ? Math.min(220, Math.max(48, Math.round(c.brand.logoSize)))
+                  typeof b.logoSize === 'number' && Number.isFinite(b.logoSize)
+                    ? Math.min(220, Math.max(48, Math.round(b.logoSize)))
                     : prev.logoSize,
                 logoOpacity:
-                  typeof c.brand.logoOpacity === 'number'
-                    ? Math.min(100, Math.max(10, Math.round(c.brand.logoOpacity)))
+                  typeof b.logoOpacity === 'number' && Number.isFinite(b.logoOpacity)
+                    ? Math.min(100, Math.max(10, Math.round(b.logoOpacity)))
                     : prev.logoOpacity,
                 logoPadding:
-                  typeof c.brand.logoPadding === 'number'
-                    ? Math.min(96, Math.max(24, Math.round(c.brand.logoPadding)))
+                  typeof b.logoPadding === 'number' && Number.isFinite(b.logoPadding)
+                    ? Math.min(96, Math.max(24, Math.round(b.logoPadding)))
                     : prev.logoPadding,
                 showBrandWordmark:
-                  typeof c.brand.showBrandWordmark === 'boolean'
-                    ? c.brand.showBrandWordmark
+                  typeof b.showBrandWordmark === 'boolean'
+                    ? b.showBrandWordmark
                     : prev.showBrandWordmark,
               }));
             }
             if (c.watermark && typeof c.watermark === 'object') {
+              const wm = c.watermark as Record<string, unknown>;
               const safeWmLogo =
-                typeof c.watermark.logoUrl === 'string' &&
-                (c.watermark.logoUrl === '' || isSafeMediaUrl(c.watermark.logoUrl))
-                  ? c.watermark.logoUrl
+                typeof wm.logoUrl === 'string' &&
+                (wm.logoUrl === '' || isSafeMediaUrl(wm.logoUrl))
+                  ? wm.logoUrl
                   : '';
               setWatermark((prev) => ({
                 ...prev,
                 ...validatedConfig.watermark,
-                enabled:
-                  typeof c.watermark.enabled === 'boolean' ? c.watermark.enabled : prev.enabled,
-                text:
-                  typeof c.watermark.text === 'string'
-                    ? c.watermark.text.slice(0, 80)
-                    : prev.text,
+                enabled: typeof wm.enabled === 'boolean' ? wm.enabled : prev.enabled,
+                text: sanitizePlainText(wm.text, 80, prev.text),
                 logoUrl: safeWmLogo,
                 tileSpacing:
-                  typeof c.watermark.tileSpacing === 'number'
-                    ? Math.min(480, Math.max(180, Math.round(c.watermark.tileSpacing)))
+                  typeof wm.tileSpacing === 'number' && Number.isFinite(wm.tileSpacing)
+                    ? Math.min(480, Math.max(180, Math.round(wm.tileSpacing)))
                     : prev.tileSpacing,
               }));
             }
@@ -1314,25 +1449,19 @@ export default function App() {
               const validLayouts: CardLayoutId[] = ['editorial', 'split', 'breaking', 'quote'];
               const importedSlides: SlideData[] = c.slides
                 .slice(0, MAX_SLIDES)
-                .map((sl: Record<string, unknown>, i: number) => {
+                .map((entry: unknown, i: number) => {
+                  const sl = (entry && typeof entry === 'object' ? entry : {}) as Record<
+                    string,
+                    unknown
+                  >;
                   const base = createInitialSlide();
-                  const slContent = (sl.content && typeof sl.content === 'object'
-                    ? sl.content
-                    : {}) as Partial<CardContent>;
                   return {
                     id: `imported-${Date.now()}-${i}`,
                     layoutId: validLayouts.includes(sl.layoutId as CardLayoutId)
                       ? (sl.layoutId as CardLayoutId)
                       : 'editorial',
-                    themeId:
-                      typeof sl.themeId === 'string' ? sl.themeId : validatedConfig.themes[0].id,
-                    content: {
-                      ...base.content,
-                      ...slContent,
-                      body: typeof slContent.body === 'string' ? slContent.body : '',
-                      direction: slContent.direction === 'rtl' ? 'rtl' : 'ltr',
-                      typography: mergeTypography(slContent.typography, base.content.typography),
-                    },
+                    themeId: sanitizePlainText(sl.themeId, 40, validatedConfig.themes[0].id),
+                    content: sanitizeImportedCardContent(sl.content, base.content),
                     background: sanitizeImportedBackground(sl.background, base.background),
                   };
                 });
@@ -1340,30 +1469,13 @@ export default function App() {
               setActiveSlideIndex(0);
             } else {
               const validLayouts: CardLayoutId[] = ['editorial', 'split', 'breaking', 'quote'];
-              const importedContent =
-                c.content && typeof c.content === 'object'
-                  ? (c.content as Partial<CardContent>)
-                  : null;
               updateActiveSlide((prev) => ({
                 ...prev,
-                layoutId: validLayouts.includes(c.layoutId) ? c.layoutId : prev.layoutId,
-                themeId: typeof c.themeId === 'string' ? c.themeId : prev.themeId,
-                content: importedContent
-                  ? {
-                      ...prev.content,
-                      ...importedContent,
-                      direction:
-                        importedContent.direction === 'rtl'
-                          ? 'rtl'
-                          : importedContent.direction === 'ltr'
-                            ? 'ltr'
-                            : prev.content.direction,
-                      typography: mergeTypography(
-                        importedContent.typography,
-                        prev.content.typography
-                      ),
-                    }
-                  : prev.content,
+                layoutId: validLayouts.includes(c.layoutId as CardLayoutId)
+                  ? (c.layoutId as CardLayoutId)
+                  : prev.layoutId,
+                themeId: sanitizePlainText(c.themeId, 40, prev.themeId),
+                content: sanitizeImportedCardContent(c.content, prev.content),
                 background: sanitizeImportedBackground(c.background, prev.background),
               }));
             }

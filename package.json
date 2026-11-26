@@ -45,6 +45,8 @@
   "build": {
     "appId": "com.arifuzzaman.azkdesk",
     "productName": "AZK Desk",
+    "asar": true,
+    "compression": "maximum",
     "directories": {
       "output": "release"
     },

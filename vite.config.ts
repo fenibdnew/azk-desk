@@ -5,11 +5,24 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const isProd = mode === 'production';
+
   return {
     plugins: [
       react(),
       tailwindcss(),
+      // Allow Vite's dev-only React Refresh inline preamble while keeping production index.html CSP strictly script-src 'self'
+      {
+        name: 'dev-csp-preamble-compat',
+        apply: 'serve',
+        transformIndexHtml(html) {
+          return html.replace(
+            "script-src 'self';",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval';"
+          );
+        },
+      },
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['apple-touch-icon.png', 'icon.svg'],
@@ -117,6 +130,29 @@ export default defineConfig(() => {
         },
       },
     ],
+    esbuild: isProd
+      ? {
+          drop: ['console', 'debugger'],
+          legalComments: 'none',
+          minifyIdentifiers: true,
+          minifySyntax: true,
+          minifyWhitespace: true,
+        }
+      : undefined,
+    build: {
+      sourcemap: false,
+      minify: 'esbuild',
+      cssMinify: true,
+      target: 'es2022',
+      reportCompressedSize: false,
+      rollupOptions: {
+        output: {
+          entryFileNames: 'assets/[hash].js',
+          chunkFileNames: 'assets/[hash].js',
+          assetFileNames: 'assets/[hash][extname]',
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -29,6 +29,11 @@ import {
 } from '../types/studio';
 import { UIStrings } from '../data/i18n';
 import { parseRawNewsText } from '../utils/newsTextParser';
+import {
+  safeJsonParse,
+  sanitizeCustomFeedUrl,
+  sanitizeRssFeedResponse,
+} from '../utils/securitySanitizer';
 
 interface RssNewsPanelProps {
   lang: Language;
@@ -63,11 +68,18 @@ function readSavedCustomFeeds(): string[] {
   try {
     const raw = window.localStorage.getItem(RSS_STORAGE_KEYS.savedCustomFeeds);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
+    const parsed = safeJsonParse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((u): u is string => typeof u === 'string' && /^https?:\/\//i.test(u))
-      .slice(0, 6);
+    const valid: string[] = [];
+    for (const u of parsed) {
+      if (typeof u !== 'string') continue;
+      const safe = sanitizeCustomFeedUrl(u);
+      if (safe && !valid.includes(safe)) {
+        valid.push(safe);
+      }
+      if (valid.length >= 6) break;
+    }
+    return valid;
   } catch {
     return [];
   }
@@ -405,10 +417,11 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
           }
           throw new Error(`HTTP ${res.status}`);
         }
-        const data = (await res.json()) as RssFeedResponse;
+        const rawTextResp = await res.text();
+        const sanitized = sanitizeRssFeedResponse(safeJsonParse(rawTextResp));
         const resolvedFeed =
-          data && Array.isArray(data.items) && data.items.length > 0
-            ? data
+          sanitized && sanitized.items.length > 0
+            ? sanitized
             : buildClientOfflineFallback(nextCountry, nextCategory, nextLang, tRef.current);
 
         setFeed(resolvedFeed);
@@ -548,15 +561,16 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
 
   const handleLoadCustomFeed = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = customFeedInput.trim();
-    if (!/^https?:\/\//i.test(trimmed)) {
+    const safeUrl = sanitizeCustomFeedUrl(customFeedInput);
+    if (!safeUrl) {
       setCustomFeedError(t.news.customFeedError);
       onNotify(t.news.customFeedError, 'error');
       return;
     }
-    setActiveCustomFeedUrl(trimmed);
+    setCustomFeedInput(safeUrl);
+    setActiveCustomFeedUrl(safeUrl);
     setSavedCustomFeeds((prev) => {
-      const next = [trimmed, ...prev.filter((u) => u !== trimmed)].slice(0, 6);
+      const next = [safeUrl, ...prev.filter((u) => u !== safeUrl)].slice(0, 6);
       writePref(RSS_STORAGE_KEYS.savedCustomFeeds, JSON.stringify(next));
       return next;
     });

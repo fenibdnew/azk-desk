@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, protocol, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, protocol, session, shell } = require('electron');
 const dns = require('node:dns').promises;
 const fs = require('node:fs');
 const net = require('node:net');
@@ -9,7 +9,18 @@ const path = require('node:path');
 const APP_SCHEME = 'app';
 const APP_HOST = 'azkdesk';
 const DIST_DIR = path.resolve(__dirname, '..', 'dist');
+const DIST_DIR_PREFIX = `${DIST_DIR}${path.sep}`;
 const CONFIG_FILE = path.resolve(__dirname, '..', 'config', 'daily-config.json');
+const DANGEROUS_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+const DESKTOP_CSP =
+  "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data: blob:; img-src 'self' data: blob: https:; connect-src 'self' https: data: blob:; worker-src 'self' blob:; manifest-src 'self'; media-src 'self' blob: data:;";
+
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+};
 
 // Register a privileged secure custom scheme so Vite's root-relative assets,
 // localStorage, FontFace API, Canvas export, and Fullscreen work identically to HTTPS
@@ -238,24 +249,54 @@ async function safeExternalFetch(rawUrl, acceptHeader) {
   throw new Error('Too many redirects.');
 }
 
+function safeJsonParse(text) {
+  return JSON.parse(text, (key, value) => {
+    if (DANGEROUS_PROTO_KEYS.has(key)) return undefined;
+    return value;
+  });
+}
+
 function decodeHtmlEntities(input) {
   return String(input || '')
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(Number(num)))
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      const n = Number.parseInt(hex, 16);
+      return Number.isFinite(n) && n >= 32 && n <= 0x10ffff ? String.fromCodePoint(n) : ' ';
+    })
+    .replace(/&#(\d+);/g, (_, num) => {
+      const n = Number.parseInt(num, 10);
+      return Number.isFinite(n) && n >= 32 && n <= 0x10ffff ? String.fromCodePoint(n) : ' ';
+    });
+}
+
+function cleanRssPlainText(input) {
+  if (!input) return '';
+  let text = decodeHtmlEntities(input)
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<iframe\b[\s\S]*?<\/iframe>/gi, ' ')
+    .replace(/<object\b[\s\S]*?<\/object>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ');
+  text = decodeHtmlEntities(text)
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[<>]/g, '')
+    .replace(/\b(?:javascript|vbscript)\s*:/gi, '')
+    .replace(/\bdata\s*:\s*text\/html/gi, '');
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 function extractXmlTag(block, tagName) {
   const re = new RegExp(`<${tagName}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tagName}>`, 'i');
   const m = block.match(re);
-  return m ? decodeHtmlEntities(m[1]) : '';
+  return m ? cleanRssPlainText(m[1]) : '';
 }
 
 function parseRssXmlTextOnly(xml, fallbackSource, categoryLabel, prefix) {
@@ -299,7 +340,11 @@ function parseRssXmlTextOnly(xml, fallbackSource, categoryLabel, prefix) {
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      ...SECURITY_HEADERS,
+    },
   });
 }
 
@@ -312,10 +357,8 @@ async function handleAppProtocolRequest(request) {
     try {
       if (fs.existsSync(CONFIG_FILE)) {
         const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
-        return new Response(raw, {
-          status: 200,
-          headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        });
+        const parsed = safeJsonParse(raw);
+        return jsonResponse(parsed, 200);
       }
     } catch {
       // fall through
@@ -323,10 +366,12 @@ async function handleAppProtocolRequest(request) {
     return jsonResponse({ version: '2026.11', editionDate: new Date().toISOString().slice(0, 10) });
   }
 
-  // 2. Remote Daily Sync JSON proxy (SSRF-protected)
+  // 2. Remote Daily Sync JSON proxy (SSRF-protected & prototype-pollution safe)
   if (pathname === '/api/proxy-json') {
     const targetUrl = url.searchParams.get('url') || '';
-    if (!targetUrl) return jsonResponse({ error: 'Missing url parameter.' }, 400);
+    if (!targetUrl || targetUrl.length > 2048) {
+      return jsonResponse({ error: 'Missing or invalid url parameter.' }, 400);
+    }
     try {
       const res = await safeExternalFetch(targetUrl, 'application/json, text/plain;q=0.9');
       if (!res.ok) return jsonResponse({ error: `Remote HTTP ${res.status}` }, res.status);
@@ -334,7 +379,7 @@ async function handleAppProtocolRequest(request) {
       if (text.length > 2 * 1024 * 1024) {
         return jsonResponse({ error: 'Remote JSON exceeds 2 MB limit.' }, 413);
       }
-      const parsed = JSON.parse(text);
+      const parsed = safeJsonParse(text);
       return jsonResponse(parsed, 200);
     } catch (err) {
       return jsonResponse({ error: err instanceof Error ? err.message : 'Fetch failed' }, 400);
@@ -413,11 +458,11 @@ async function handleAppProtocolRequest(request) {
     });
   }
 
-  // 4. Static file resolution inside dist/ (with strict path-traversal guard)
+  // 4. Static file resolution inside dist/ (with strict trailing path.sep traversal guard)
   const relPath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   let candidate = path.resolve(DIST_DIR, relPath);
-  if (!candidate.startsWith(DIST_DIR)) {
-    return new Response('Forbidden', { status: 403 });
+  if (candidate !== DIST_DIR && !candidate.startsWith(DIST_DIR_PREFIX)) {
+    return new Response('Forbidden', { status: 403, headers: SECURITY_HEADERS });
   }
   if (!fs.existsSync(candidate) || fs.statSync(candidate).isDirectory()) {
     candidate = path.join(DIST_DIR, 'index.html');
@@ -426,22 +471,120 @@ async function handleAppProtocolRequest(request) {
     const ext = path.extname(candidate).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
     const data = fs.readFileSync(candidate);
-    return new Response(data, {
-      status: 200,
-      headers: { 'Content-Type': contentType },
-    });
+    const headers = {
+      'Content-Type': contentType,
+      ...SECURITY_HEADERS,
+    };
+    if (ext === '.html') {
+      headers['Content-Security-Policy'] = DESKTOP_CSP;
+    }
+    return new Response(data, { status: 200, headers });
   } catch {
-    return new Response('Not Found', { status: 404 });
+    return new Response('Not Found', { status: 404, headers: SECURITY_HEADERS });
   }
 }
 
-function isSafeExternalUrl(rawUrl) {
+// Strictly allow only public HTTPS URLs (no HTTP, javascript:, file:, data:, credentials, or local/private hosts)
+function isSafeExternalHttpsUrl(rawUrl) {
+  if (typeof rawUrl !== 'string' || rawUrl.length > 2048) return false;
   try {
     const parsed = new URL(rawUrl);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    if (parsed.protocol !== 'https:') return false;
+    if (parsed.username || parsed.password) return false;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      !host ||
+      !host.includes('.') ||
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host.endsWith('.local') ||
+      host.endsWith('.internal')
+    ) {
+      return false;
+    }
+    if (net.isIP(host) && isPrivateOrReservedIp(host)) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }
+}
+
+function isInternalAppUrl(targetUrl) {
+  if (typeof targetUrl !== 'string') return false;
+  if (targetUrl.startsWith(`${APP_SCHEME}://${APP_HOST}/`) || targetUrl === `${APP_SCHEME}://${APP_HOST}`) {
+    return true;
+  }
+  const devUrl = !app.isPackaged ? process.env.AZK_DEV_URL : '';
+  if (devUrl && targetUrl.startsWith(devUrl)) {
+    return true;
+  }
+  return false;
+}
+
+function attachNavigationAndDevToolsGuards(contents) {
+  // Never allow embedded <webview> tags
+  contents.on('will-attach-webview', (event) => {
+    event.preventDefault();
+  });
+
+  // Restrict external window opening strictly to trusted public HTTPS links in the system browser
+  contents.setWindowOpenHandler(({ url }) => {
+    if (isSafeExternalHttpsUrl(url)) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  // Block any in-window navigation away from the app origin; open safe HTTPS links externally
+  contents.on('will-navigate', (event, navUrl) => {
+    if (!isInternalAppUrl(navUrl)) {
+      event.preventDefault();
+      if (isSafeExternalHttpsUrl(navUrl)) {
+        shell.openExternal(navUrl);
+      }
+    }
+  });
+
+  // In packaged production builds, strictly disable DevTools and inspect shortcuts
+  if (app.isPackaged) {
+    contents.on('devtools-opened', () => {
+      if (!contents.isDestroyed()) {
+        contents.closeDevTools();
+      }
+    });
+
+    contents.on('context-menu', (event) => {
+      event.preventDefault();
+    });
+  }
+
+  contents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+
+    const key = String(input.key || '').toLowerCase();
+    const hasModifier = Boolean(input.control || input.meta);
+
+    if (app.isPackaged) {
+      const isDevToolsShortcut =
+        key === 'f12' ||
+        (hasModifier && input.shift && (key === 'i' || key === 'j' || key === 'c')) ||
+        (hasModifier && input.alt && (key === 'i' || key === 'j' || key === 'c')) ||
+        (hasModifier && key === 'u');
+
+      if (isDevToolsShortcut) {
+        event.preventDefault();
+        return;
+      }
+    }
+
+    // Allow F11 fullscreen toggle cleanly on Windows
+    if (key === 'f11' && mainWindow && !mainWindow.isDestroyed()) {
+      event.preventDefault();
+      mainWindow.setFullScreen(!mainWindow.isFullScreen());
+    }
+  });
 }
 
 let mainWindow = null;
@@ -463,12 +606,17 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      nodeIntegrationInWorker: false,
+      nodeIntegrationInSubFrames: false,
       sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      devTools: !app.isPackaged,
       spellcheck: true,
     },
   });
 
-  // Clean minimal menu keeping F11 fullscreen and Ctrl/Cmd+Q quit predictable on Windows
+  // Clean minimal menu keeping standard Windows window controls and close ("X") predictable
   Menu.setApplicationMenu(null);
 
   mainWindow.once('ready-to-show', () => {
@@ -477,43 +625,12 @@ function createMainWindow() {
     }
   });
 
-  // Allow F11 fullscreen toggle and Escape to exit window fullscreen cleanly on Windows
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (input.type === 'keyDown' && input.key === 'F11') {
-      event.preventDefault();
-      mainWindow.setFullScreen(!mainWindow.isFullScreen());
-    }
-  });
-
-  // Open all external target="_blank" / window.open links in the user's default browser
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isSafeExternalUrl(url)) {
-      shell.openExternal(url);
-    }
-    return { action: 'deny' };
-  });
-
-  // Prevent unexpected in-window navigation away from the app origin
-  mainWindow.webContents.on('will-navigate', (event, navUrl) => {
-    const devUrl = process.env.AZK_DEV_URL;
-    const isInternal =
-      navUrl.startsWith(`${APP_SCHEME}://${APP_HOST}`) ||
-      (devUrl && navUrl.startsWith(devUrl));
-    if (!isInternal) {
-      event.preventDefault();
-      if (isSafeExternalUrl(navUrl)) {
-        shell.openExternal(navUrl);
-      }
-    }
-  });
-
   // Clean standard Windows close ("X") behavior — never block or trap close
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 
-  const devUrl = process.env.AZK_DEV_URL;
+  const devUrl = !app.isPackaged ? process.env.AZK_DEV_URL : '';
   if (devUrl) {
     mainWindow.loadURL(devUrl);
   } else {
@@ -533,6 +650,11 @@ ipcMain.handle('azk-desktop:is-fullscreen', () => {
   return mainWindow.isFullScreen();
 });
 
+// Enforce strict navigation, window-open, webview, and DevTools guards on every WebContents
+app.on('web-contents-created', (_event, contents) => {
+  attachNavigationAndDevToolsGuards(contents);
+});
+
 // Single-instance lock so launching the Windows .exe twice focuses the existing window
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -546,6 +668,12 @@ if (!gotSingleInstanceLock) {
   });
 
   app.whenReady().then(() => {
+    // Restrict renderer permission requests strictly to fullscreen and safe clipboard write
+    const allowedPermissions = new Set(['fullscreen', 'clipboard-sanitized-write']);
+    session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+      callback(allowedPermissions.has(permission));
+    });
+
     protocol.handle(APP_SCHEME, handleAppProtocolRequest);
     createMainWindow();
 
