@@ -170,10 +170,24 @@ export const DEFAULT_DAILY_CONFIG: DailyConfig = {
     },
     {
       id: 'quote',
-      name: 'Analysis Card',
-      nameBn: 'বিশ্লেষণ কার্ড',
-      description: 'Centered editorial commentary layout with refined serif spacing and attribution.',
-      descriptionBn: 'উদ্ধৃতি বা গভীর বিশ্লেষণের জন্য কেন্দ্রিক টাইপোগ্রাফি লেআউট।',
+      name: 'Quote & Analysis',
+      nameBn: 'উক্তি ও বিশ্লেষণ',
+      description: 'Centered editorial commentary layout with oversized quote glyph and speaker attribution.',
+      descriptionBn: 'বড় উদ্ধৃতি চিহ্ন ও বক্তার নামসহ কেন্দ্রিক টাইপোগ্রাফি লেআউট।',
+    },
+    {
+      id: 'data-card',
+      name: 'Data / Market Rate',
+      nameBn: 'ডেটা ও মার্কেট রেট',
+      description: 'Customizable key-value metric rows for currencies, commodities, stats, or scores.',
+      descriptionBn: 'মুদ্রা, বাজারদর, পরিসংখ্যান বা যেকোনো ডেটা সারণির জন্য পরিচ্ছন্ন কার্ড।',
+    },
+    {
+      id: 'thumbnail',
+      name: 'Video Thumbnail',
+      nameBn: 'ভিডিও থাম্বনেইল',
+      description: 'Bold 16:9 broadcast display typography with a drop-shadow framed photo panel.',
+      descriptionBn: '১৬:৯ ভিডিও ও ইউটিউবের জন্য বড় শিরোনাম ও ড্রপ-শ্যাডো ছবির ফ্রেম।',
     },
   ],
   curated: {

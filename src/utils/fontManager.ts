@@ -1,4 +1,4 @@
-import { CustomFontAsset, FontWeightValue, TypographySettings } from '../types/studio';
+import { CustomFontAsset, FontWeightValue, TextDirection, TypographySettings } from '../types/studio';
 
 export interface BundledFontOption {
   id: string;
@@ -11,14 +11,14 @@ export interface BundledFontOption {
 export const BUNDLED_FONTS: BundledFontOption[] = [
   {
     id: 'plus-jakarta-sans',
-    label: 'Plus Jakarta Sans (EN / Global)',
+    label: 'Plus Jakarta Sans (EN / ES / FR / DE)',
     family: 'Plus Jakarta Sans',
     script: 'global',
     style: 'sans',
   },
   {
     id: 'inter',
-    label: 'Inter (Modern Sans)',
+    label: 'Inter (Global Latin Sans)',
     family: 'Inter',
     script: 'en',
     style: 'sans',
@@ -172,6 +172,36 @@ export function buildCanvasFontStack(primaryFamily: string): string {
     (fb) => fb.toLowerCase() !== primaryQuoted.toLowerCase()
   );
   return [primaryQuoted, ...filteredFallbacks].join(', ');
+}
+
+/**
+ * Inspects Unicode character ranges in headline/body text to detect RTL scripts
+ * (Arabic, Urdu, Persian, Hebrew) as well as Devanagari (Hindi) and Bengali.
+ */
+export function detectScriptAndDirection(text: string): {
+  direction: TextDirection;
+  suggestedFont: string | null;
+  scriptLabel: string;
+} {
+  const sample = (text || '').trim();
+  if (!sample) {
+    return { direction: 'ltr', suggestedFont: null, scriptLabel: 'Latin' };
+  }
+
+  const rtlCount = (sample.match(/[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/g) || []).length;
+  const bengaliCount = (sample.match(/[\u0980-\u09FF]/g) || []).length;
+  const devanagariCount = (sample.match(/[\u0900-\u097F]/g) || []).length;
+
+  if (rtlCount >= 3 && rtlCount >= bengaliCount && rtlCount >= devanagariCount) {
+    return { direction: 'rtl', suggestedFont: 'Noto Sans Arabic', scriptLabel: 'Arabic / Urdu (RTL)' };
+  }
+  if (devanagariCount >= 3 && devanagariCount >= bengaliCount) {
+    return { direction: 'ltr', suggestedFont: 'Noto Sans Devanagari', scriptLabel: 'Devanagari (Hindi)' };
+  }
+  if (bengaliCount >= 3) {
+    return { direction: 'ltr', suggestedFont: 'Hind Siliguri', scriptLabel: 'Bengali (বাংলা)' };
+  }
+  return { direction: 'ltr', suggestedFont: 'Plus Jakarta Sans', scriptLabel: 'Latin (EN / ES / FR / DE)' };
 }
 
 const MAX_FONT_BYTES = 4 * 1024 * 1024; // 4 MB cap

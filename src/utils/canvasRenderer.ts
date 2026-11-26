@@ -6,13 +6,16 @@ import {
   CardLayoutId,
   CardTheme,
   CornerPosition,
+  DataCardRow,
   ExportScale,
+  Language,
   LayerTypography,
   ScrimStyle,
   TextDirection,
   WatermarkSettings,
 } from '../types/studio';
 import { buildCanvasFontStack, createDefaultTypography } from './fontManager';
+import { formatCardDateBadge } from './calendarFormatter';
 
 export interface RenderCardParams {
   canvas: HTMLCanvasElement;
@@ -29,6 +32,7 @@ export interface RenderCardParams {
   slideIndex?: number;
   totalSlides?: number;
   scale?: ExportScale;
+  lang?: Language;
 }
 
 export function getCanvasDimensions(aspectRatio: AspectRatio): { width: number; height: number } {
@@ -464,6 +468,50 @@ function drawSlidePagination(
   ctx.restore();
 }
 
+function drawCardDateBadge(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  brandCorner: CornerPosition,
+  hasPagination: boolean,
+  dateText: string,
+  overDark: boolean,
+  compact: boolean,
+  fontStack: string
+) {
+  const clean = dateText.trim();
+  if (!clean) return;
+
+  const isTopRightBusy = brandCorner === 'top-right';
+  const pad = compact ? 36 : 54;
+  const fontSize = compact ? 15 : 18;
+  const padX = compact ? 14 : 18;
+  const boxH = compact ? 32 : 38;
+  const topY = hasPagination ? pad + (compact ? 42 : 48) : pad;
+
+  ctx.save();
+  ctx.direction = 'ltr';
+  ctx.font = `600 ${fontSize}px ${fontStack}`;
+  const maxBoxW = Math.round(width * 0.62);
+  const measuredW = ctx.measureText(clean).width;
+  const boxW = Math.min(maxBoxW, Math.ceil(measuredW + padX * 2));
+  const drawX = isTopRightBusy ? pad : width - pad - boxW;
+
+  ctx.fillStyle = overDark ? 'rgba(9, 12, 18, 0.62)' : 'rgba(255, 255, 255, 0.9)';
+  drawRoundedRect(ctx, drawX, topY, boxW, boxH, 8);
+  ctx.fill();
+
+  ctx.strokeStyle = overDark ? 'rgba(255, 255, 255, 0.16)' : 'rgba(15, 23, 42, 0.14)';
+  ctx.lineWidth = 1.25;
+  drawRoundedRect(ctx, drawX, topY, boxW, boxH, 8);
+  ctx.stroke();
+
+  ctx.fillStyle = overDark ? '#F8FAFC' : '#111827';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(clean, drawX + boxW / 2, topY + boxH / 2 + 0.5, boxW - padX * 1.4);
+  ctx.restore();
+}
+
 function drawWatermarkLayer(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -746,6 +794,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     slideIndex = 0,
     totalSlides = 1,
     scale = 1,
+    lang = 'en',
   } = params;
 
   const { width, height } = getCanvasDimensions(aspectRatio);
@@ -778,6 +827,16 @@ export function renderNewsCard(params: RenderCardParams): void {
   const headlineStack = buildCanvasFontStack(hlTypo.fontFamily);
   const hookStack = buildCanvasFontStack(hookTypo.fontFamily);
   const bodyStack = buildCanvasFontStack(bodyTypo.fontFamily);
+  const metaStack = buildCanvasFontStack(metaTypo.fontFamily);
+
+  const dateBadgeText = formatCardDateBadge(
+    {
+      showDateBadge: content.showDateBadge,
+      includeBengaliDate: content.includeBengaliDate,
+      includeHijriDate: content.includeHijriDate,
+    },
+    lang
+  );
 
   const isLandscape = aspectRatio === '1280x720';
   const isStory = aspectRatio === '1080x1920';
@@ -809,6 +868,441 @@ export function renderNewsCard(params: RenderCardParams): void {
       drawProceduralRegion(ctx, rx, ry, rw, rh, background.procedural);
     }
   };
+
+  const drawTopOverlays = (overDark: boolean, compact: boolean) => {
+    drawBrandLockup(ctx, width, height, brand, logoImage, theme, overDark, brandScale);
+    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, overDark, compact);
+    if (dateBadgeText) {
+      drawCardDateBadge(
+        ctx,
+        width,
+        brand.logoCorner,
+        totalSlides > 1,
+        dateBadgeText,
+        overDark,
+        compact,
+        metaStack
+      );
+    }
+  };
+
+  if (layoutId === 'data-card') {
+    drawBackgroundInRect(0, 0, width, height);
+    drawScrimOverlay(
+      ctx,
+      width,
+      height,
+      theme.scrimColor,
+      Math.max(66, background.scrimOpacity),
+      'full',
+      scrimAngle
+    );
+    drawWatermarkLayer(ctx, width, height, watermark, watermarkLogoImage || logoImage, false);
+
+    ctx.fillStyle = theme.accent;
+    ctx.fillRect(0, 0, width, isLandscape ? 8 : 10);
+
+    const anchorX = getAnchorX(marginX, width - marginX);
+    let cursorY = isLandscape ? 118 : isStory ? 248 : 178;
+
+    if (content.category.trim()) {
+      const b = drawBadge(
+        ctx,
+        content.category.trim(),
+        anchorX,
+        cursorY,
+        theme.badgeBg,
+        theme.badgeText,
+        badgeFontSize,
+        resolvedAlign,
+        direction,
+        hookStack
+      );
+      cursorY += b.height + (isLandscape ? 12 : 16);
+    }
+
+    if (content.hook.trim()) {
+      const hkSize = Math.max(15, Math.min(30, Math.round((hookTypo.fontSize - 1) * typeScale)));
+      const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
+      ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
+      ctx.fillStyle = rgba('#FFFFFF', 0.82);
+      ctx.textAlign = resolvedAlign;
+      ctx.textBaseline = 'top';
+      const hookLines = wrapText(ctx, content.hook.trim(), contentWidth, 2);
+      for (const line of hookLines) {
+        ctx.fillText(line, anchorX, cursorY);
+        cursorY += hkLineH;
+      }
+      cursorY += 8;
+    }
+
+    const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
+    const hlSize = Math.min(isLandscape ? 46 : 58, Math.max(28, baseHl - 10));
+    const hlLineH = Math.round(hlSize * hlTypo.lineHeight);
+    ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = resolvedAlign;
+    ctx.textBaseline = 'top';
+    const hlLines = wrapText(ctx, content.headline, contentWidth, isLandscape ? 2 : 3);
+    for (const line of hlLines) {
+      ctx.fillText(line, anchorX, cursorY);
+      cursorY += hlLineH;
+    }
+
+    if (content.body.trim()) {
+      cursorY += 8;
+      const bdSize = Math.max(15, Math.min(28, Math.round((bodyTypo.fontSize - 4) * typeScale)));
+      const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
+      ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
+      ctx.fillStyle = rgba('#E2E8F0', 0.85);
+      ctx.textAlign = resolvedAlign;
+      ctx.textBaseline = 'top';
+      const bodyLines = wrapText(ctx, content.body, contentWidth, 2);
+      for (const line of bodyLines) {
+        ctx.fillText(line, anchorX, cursorY);
+        cursorY += bdLineH;
+      }
+    }
+
+    // Customizable Key-Value Metric Rows
+    const fallbackRows: DataCardRow[] = [
+      { id: 'r1', label: 'EUR / USD', value: '1.0842', delta: '+0.32%' },
+      { id: 'r2', label: 'Gold (1 oz)', value: '$2,645', delta: '+1.14%' },
+      { id: 'r3', label: 'Brent Crude', value: '$74.80', delta: '-0.65%' },
+      { id: 'r4', label: 'Global Tech Index', value: '18,420', delta: '+0.88%' },
+    ];
+    const rows =
+      content.dataRows && content.dataRows.length > 0
+        ? content.dataRows.filter((r) => r.label.trim() || r.value.trim()).slice(0, 6)
+        : fallbackRows;
+
+    const tableTop = cursorY + (isLandscape ? 18 : 26);
+    const footerY = height - footerOffset;
+    const warnReserve = warningActive ? Math.round(56 * typeScale) : 0;
+    const tableBottom = footerY - warnReserve - (isLandscape ? 16 : 24);
+    const availableH = Math.max(140, tableBottom - tableTop);
+
+    const useTwoCols = isLandscape && rows.length >= 4;
+    const colGap = 18;
+    const rowGap = isLandscape ? 12 : 16;
+    const numCols = useTwoCols ? 2 : 1;
+    const numVisualRows = Math.ceil(rows.length / numCols);
+    const colW = useTwoCols ? (contentWidth - colGap) / 2 : contentWidth;
+    const maxRowH = isLandscape ? 88 : isStory ? 132 : 104;
+    const minRowH = isLandscape ? 58 : 74;
+    const computedRowH = Math.floor((availableH - rowGap * Math.max(0, numVisualRows - 1)) / Math.max(1, numVisualRows));
+    const rowH = Math.max(minRowH, Math.min(maxRowH, computedRowH));
+
+    const labelSize = Math.max(17, Math.min(30, Math.round((useTwoCols ? 21 : 26) * typeScale)));
+    const valueSize = Math.max(20, Math.min(38, Math.round((useTwoCols ? 26 : 34) * typeScale)));
+    const deltaSize = Math.max(13, Math.min(20, Math.round(16 * typeScale)));
+
+    rows.forEach((row, idx) => {
+      const colIdx = useTwoCols ? idx % 2 : 0;
+      const rowIdx = useTwoCols ? Math.floor(idx / 2) : idx;
+      const rx = marginX + colIdx * (colW + colGap);
+      const ry = tableTop + rowIdx * (rowH + rowGap);
+      if (ry + rowH > tableBottom + 6) return;
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
+      drawRoundedRect(ctx, rx, ry, colW, rowH, 12);
+      ctx.fill();
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
+      ctx.lineWidth = 1.5;
+      drawRoundedRect(ctx, rx, ry, colW, rowH, 12);
+      ctx.stroke();
+
+      // Subtle accent bar on leading side of each metric row
+      ctx.fillStyle = theme.accent;
+      if (isRtl) {
+        ctx.fillRect(rx + colW - 6, ry + 12, 6, rowH - 24);
+      } else {
+        ctx.fillRect(rx, ry + 12, 6, rowH - 24);
+      }
+
+      const innerPadX = isLandscape ? 22 : 28;
+      const midY = ry + rowH / 2;
+      const deltaText = (row.delta || '').trim();
+      const hasDelta = deltaText.length > 0;
+
+      // Label on leading side
+      ctx.direction = direction;
+      ctx.font = `600 ${labelSize}px ${bodyStack}`;
+      ctx.fillStyle = '#E2E8F0';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = isRtl ? 'right' : 'left';
+      const labelX = isRtl ? rx + colW - innerPadX : rx + innerPadX;
+      ctx.fillText(row.label.trim() || '—', labelX, midY, colW * 0.52);
+
+      // Value (+ optional delta below or beside) on trailing side
+      const trailingX = isRtl ? rx + innerPadX : rx + colW - innerPadX;
+      ctx.textAlign = isRtl ? 'left' : 'right';
+      ctx.font = `700 ${valueSize}px "JetBrains Mono", ${headlineStack}`;
+      ctx.fillStyle = '#FFFFFF';
+      const valueY = hasDelta ? midY - Math.round(deltaSize * 0.55) : midY;
+      ctx.fillText(row.value.trim() || '—', trailingX, valueY, colW * 0.42);
+
+      if (hasDelta) {
+        const isPositive = /^\+|▲|↑/.test(deltaText);
+        const isNegative = /^-|▼|↓/.test(deltaText);
+        ctx.font = `600 ${deltaSize}px "JetBrains Mono", ${metaStack}`;
+        ctx.fillStyle = isPositive ? '#34D399' : isNegative ? '#FB7185' : '#94A3B8';
+        ctx.fillText(deltaText, trailingX, midY + Math.round(valueSize * 0.52), colW * 0.42);
+      }
+      ctx.restore();
+    });
+
+    if (warningActive) {
+      const warnY = Math.min(
+        footerY - Math.round(52 * typeScale),
+        tableTop + numVisualRows * (rowH + rowGap) + 6
+      );
+      drawBadge(
+        ctx,
+        `⚠ ${content.warning.trim()}`,
+        anchorX,
+        warnY,
+        theme.warningBg,
+        theme.warningText,
+        warnFontSize,
+        resolvedAlign,
+        direction,
+        hookStack
+      );
+    }
+
+    drawAttributionFooter(
+      ctx,
+      marginX,
+      footerY,
+      contentWidth,
+      content.source,
+      content.credit,
+      '#FFFFFF',
+      '#CBD5E1',
+      'rgba(255,255,255,0.22)',
+      metaTypo,
+      direction,
+      typeScale,
+      Boolean(content.showVerifiedRssStamp),
+      false
+    );
+
+    drawTopOverlays(true, isLandscape);
+    ctx.restore();
+    return;
+  }
+
+  if (layoutId === 'thumbnail') {
+    // Bold Broadcast / Video Thumbnail Layout (Optimized for 16:9 with drop-shadow framed photo cutout)
+    const baseBg = isLightTheme ? '#0F172A' : theme.background;
+    const baseSec = isLightTheme ? '#1E293B' : theme.backgroundSecondary;
+    const grad = ctx.createLinearGradient(0, 0, width, height);
+    grad.addColorStop(0, baseBg);
+    grad.addColorStop(1, baseSec);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    // Subtle atmospheric spotlight behind the subject photo frame
+    const spotX = isLandscape ? (isRtl ? width * 0.25 : width * 0.75) : width * 0.5;
+    const spotY = isLandscape ? height * 0.5 : height * 0.34;
+    const spotlight = ctx.createRadialGradient(
+      spotX,
+      spotY,
+      20,
+      spotX,
+      spotY,
+      Math.max(width, height) * 0.55
+    );
+    spotlight.addColorStop(0, rgba(theme.accent, 0.36));
+    spotlight.addColorStop(1, rgba(theme.accent, 0));
+    ctx.fillStyle = spotlight;
+    ctx.fillRect(0, 0, width, height);
+
+    drawWatermarkLayer(ctx, width, height, watermark, watermarkLogoImage || logoImage, false);
+
+    // High-impact broadcast edge accent strip
+    ctx.fillStyle = theme.accent;
+    if (isRtl) {
+      ctx.fillRect(width - 12, 0, 12, height);
+    } else {
+      ctx.fillRect(0, 0, 12, height);
+    }
+
+    // Drop-shadow framed photo cutout panel
+    let frameX: number;
+    let frameY: number;
+    let frameW: number;
+    let frameH: number;
+    let textLeft: number;
+    let textRight: number;
+    let textStartY: number;
+
+    if (isLandscape) {
+      frameW = Math.round(width * 0.4);
+      frameH = Math.round(height * 0.68);
+      frameY = Math.round((height - frameH) / 2 + 12);
+      frameX = isRtl ? marginX : width - marginX - frameW;
+      textLeft = isRtl ? frameX + frameW + 44 : marginX;
+      textRight = isRtl ? width - marginX : frameX - 44;
+      textStartY = 126;
+    } else {
+      frameW = contentWidth;
+      frameH = Math.round(height * (isStory ? 0.35 : 0.38));
+      frameX = marginX;
+      frameY = isStory ? 235 : 170;
+      textLeft = marginX;
+      textRight = width - marginX;
+      textStartY = frameY + frameH + 36;
+    }
+
+    // Draw elevated drop shadow & clipped rounded photo frame
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.62)';
+    ctx.shadowBlur = 38;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 16;
+    ctx.fillStyle = '#090D16';
+    drawRoundedRect(ctx, frameX, frameY, frameW, frameH, 20);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    drawRoundedRect(ctx, frameX, frameY, frameW, frameH, 20);
+    ctx.clip();
+    drawBackgroundInRect(frameX, frameY, frameW, frameH);
+    const frameRimShade = ctx.createLinearGradient(0, frameY, 0, frameY + frameH);
+    frameRimShade.addColorStop(0, 'rgba(0,0,0,0.06)');
+    frameRimShade.addColorStop(1, 'rgba(0,0,0,0.28)');
+    ctx.fillStyle = frameRimShade;
+    ctx.fillRect(frameX, frameY, frameW, frameH);
+    ctx.restore();
+
+    // Crisp rim border around framed photo cutout
+    ctx.save();
+    ctx.strokeStyle = rgba('#FFFFFF', 0.28);
+    ctx.lineWidth = 3;
+    drawRoundedRect(ctx, frameX, frameY, frameW, frameH, 20);
+    ctx.stroke();
+
+    // Accent corner highlight bar on the photo frame
+    ctx.fillStyle = theme.accent;
+    drawRoundedRect(ctx, frameX + 24, frameY + frameH - 6, Math.min(120, frameW * 0.35), 6, 3);
+    ctx.fill();
+    ctx.restore();
+
+    // Bold high-impact thumbnail typography deck
+    const textW = Math.max(220, textRight - textLeft);
+    const anchorX = getAnchorX(textLeft, textRight);
+    let y = textStartY;
+
+    if (content.category.trim()) {
+      const catB = drawBadge(
+        ctx,
+        content.category.trim().toUpperCase(),
+        anchorX,
+        y,
+        theme.accent,
+        '#FFFFFF',
+        Math.round((isLandscape ? 20 : 23) * typeScale),
+        resolvedAlign,
+        direction,
+        hookStack,
+        8
+      );
+      y += catB.height + (isLandscape ? 18 : 22);
+    }
+
+    if (content.hook.trim()) {
+      const hkSize = Math.max(16, Math.min(32, Math.round(hookTypo.fontSize * typeScale)));
+      const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
+      ctx.font = `700 ${hkSize}px ${hookStack}`;
+      ctx.fillStyle = '#FBBF24';
+      ctx.textAlign = resolvedAlign;
+      ctx.textBaseline = 'top';
+      const hookLines = wrapText(ctx, content.hook.trim(), textW, 2);
+      for (const line of hookLines) {
+        ctx.fillText(line, anchorX, y);
+        y += hkLineH;
+      }
+      y += 10;
+    }
+
+    const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * (isLandscape ? 0.94 : typeScale));
+    const hlSize = Math.min(isLandscape ? 72 : 82, Math.max(40, baseHl));
+    const hlLineH = Math.round(hlSize * Math.min(1.18, hlTypo.lineHeight));
+    ctx.font = `700 ${hlSize}px ${headlineStack}`;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = resolvedAlign;
+    ctx.textBaseline = 'top';
+    ctx.shadowColor = 'rgba(0,0,0,0.58)';
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 5;
+    const hlLines = wrapText(ctx, content.headline, textW, isLandscape ? 4 : 4);
+    for (const line of hlLines) {
+      if (y > height - footerOffset - 28) break;
+      ctx.fillText(line, anchorX, y);
+      y += hlLineH;
+    }
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    if (content.body.trim() && y < height - footerOffset - 48) {
+      y += 12;
+      const bdSize = Math.max(16, Math.min(30, Math.round((bodyTypo.fontSize - 2) * typeScale)));
+      const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
+      ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
+      ctx.fillStyle = rgba('#E2E8F0', 0.9);
+      ctx.textAlign = resolvedAlign;
+      ctx.textBaseline = 'top';
+      const bodyLines = wrapText(ctx, content.body, textW, 2);
+      for (const line of bodyLines) {
+        if (y > height - footerOffset - 24) break;
+        ctx.fillText(line, anchorX, y);
+        y += bdLineH;
+      }
+    }
+
+    if (warningActive && y < height - footerOffset - 36) {
+      y += 14;
+      drawBadge(
+        ctx,
+        `⚠ ${content.warning.trim()}`,
+        anchorX,
+        y,
+        theme.warningBg,
+        theme.warningText,
+        warnFontSize,
+        resolvedAlign,
+        direction,
+        hookStack
+      );
+    }
+
+    drawAttributionFooter(
+      ctx,
+      marginX,
+      height - footerOffset,
+      contentWidth,
+      content.source,
+      content.credit,
+      '#FFFFFF',
+      '#CBD5E1',
+      'rgba(255,255,255,0.2)',
+      metaTypo,
+      direction,
+      typeScale,
+      Boolean(content.showVerifiedRssStamp),
+      false
+    );
+
+    drawTopOverlays(true, isLandscape);
+    ctx.restore();
+    return;
+  }
 
   if (layoutId === 'split') {
     if (isLandscape) {
@@ -934,8 +1428,7 @@ export function renderNewsCard(params: RenderCardParams): void {
         isLightTheme
       );
 
-      drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
-      drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, true);
+      drawTopOverlays(true, true);
       ctx.restore();
       return;
     }
@@ -1057,8 +1550,7 @@ export function renderNewsCard(params: RenderCardParams): void {
       isLightTheme
     );
 
-    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
-    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, false);
+    drawTopOverlays(true, false);
     ctx.restore();
     return;
   }
@@ -1211,8 +1703,7 @@ export function renderNewsCard(params: RenderCardParams): void {
       false
     );
 
-    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
-    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, isLandscape);
+    drawTopOverlays(true, isLandscape);
     ctx.restore();
     return;
   }
@@ -1417,8 +1908,7 @@ export function renderNewsCard(params: RenderCardParams): void {
       false
     );
 
-    drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
-    drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, isLandscape);
+    drawTopOverlays(true, isLandscape);
     ctx.restore();
     return;
   }
@@ -1574,7 +2064,6 @@ export function renderNewsCard(params: RenderCardParams): void {
     false
   );
 
-  drawBrandLockup(ctx, width, height, brand, logoImage, theme, true, brandScale);
-  drawSlidePagination(ctx, width, brand.logoCorner, slideIndex, totalSlides, true, isLandscape);
+  drawTopOverlays(true, isLandscape);
   ctx.restore();
 }

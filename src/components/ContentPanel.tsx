@@ -3,9 +3,14 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  BarChart3,
+  Calendar,
   ChevronDown,
   ClipboardPaste,
+  Film,
+  Languages,
   ListFilter,
+  Plus,
   Quote,
   RotateCcw,
   ShieldCheck,
@@ -21,6 +26,7 @@ import {
   CardTheme,
   CuratedLists,
   CustomFontAsset,
+  DataCardRow,
   FontWeightValue,
   Language,
   LayerTypography,
@@ -39,8 +45,10 @@ import {
 import {
   BUNDLED_FONTS,
   createDefaultTypography,
+  detectScriptAndDirection,
   FONT_WEIGHT_OPTIONS,
 } from '../utils/fontManager';
+import { formatCardDateBadge } from '../utils/calendarFormatter';
 
 interface ContentPanelProps {
   lang: Language;
@@ -62,6 +70,8 @@ interface ContentPanelProps {
   storyPresets: StoryPreset[];
   onApplyStoryPreset: (preset: StoryPreset) => void;
   onApplyQuotePreset: () => void;
+  onApplyDataCardPreset: () => void;
+  onApplyThumbnailPreset: () => void;
   onApplyRawNews: (parsed: ParsedRawNews) => void;
   watermark: WatermarkSettings;
   onChangeWatermark: (patch: Partial<WatermarkSettings>) => void;
@@ -112,6 +122,8 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
   storyPresets,
   onApplyStoryPreset,
   onApplyQuotePreset,
+  onApplyDataCardPreset,
+  onApplyThumbnailPreset,
   onApplyRawNews,
   watermark,
   onChangeWatermark,
@@ -220,38 +232,66 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Quick Bilingual Story Starters + Inline Paste Raw News Auto-Fill */}
+      {/* Quick Bilingual Story Starters + Universal 1-Click Creator Templates + Inline Paste */}
       <div className="space-y-2.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">
             {t.actions.applyPreset}
           </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={onApplyQuotePreset}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                activeLayoutId === 'quote'
-                  ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
-                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
-              }`}
-            >
-              <Quote className="w-3.5 h-3.5 text-red-600 shrink-0" />
-              <span>{t.actions.quotePresetBtn}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowQuickPaste((prev) => !prev)}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                showQuickPaste
-                  ? 'border-red-600 bg-red-600/10 text-red-700 dark:text-red-400'
-                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
-              }`}
-            >
-              <ClipboardPaste className="w-3.5 h-3.5" />
-              <span>{t.content.pasteAutoFillBtn}</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowQuickPaste((prev) => !prev)}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+              showQuickPaste
+                ? 'border-red-600 bg-red-600/10 text-red-700 dark:text-red-400'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
+            }`}
+          >
+            <ClipboardPaste className="w-3.5 h-3.5" />
+            <span>{t.content.pasteAutoFillBtn}</span>
+          </button>
+        </div>
+
+        {/* Universal 1-Click Creator Templates */}
+        <div className="grid grid-cols-3 gap-1.5">
+          <button
+            type="button"
+            onClick={onApplyQuotePreset}
+            className={`inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors truncate cursor-pointer ${
+              activeLayoutId === 'quote'
+                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
+            }`}
+          >
+            <Quote className="w-3.5 h-3.5 text-red-600 shrink-0" />
+            <span className="truncate">{t.actions.quotePresetBtn}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onApplyDataCardPreset}
+            className={`inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors truncate cursor-pointer ${
+              activeLayoutId === 'data-card'
+                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-red-600 shrink-0" />
+            <span className="truncate">{t.actions.dataCardPresetBtn}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onApplyThumbnailPreset}
+            className={`inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors truncate cursor-pointer ${
+              activeLayoutId === 'thumbnail'
+                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
+            }`}
+          >
+            <Film className="w-3.5 h-3.5 text-red-600 shrink-0" />
+            <span className="truncate">{t.actions.thumbnailPresetBtn}</span>
+          </button>
         </div>
 
         {showQuickPaste && (
@@ -510,6 +550,105 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
           </div>
         )}
 
+        {/* Customizable Key-Value Metric Rows (shown on Data / Market Rate Card layout) */}
+        {activeLayoutId === 'data-card' && (
+          <div className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                  <BarChart3 className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                  <span>{t.content.dataRowsTitle}</span>
+                </div>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  {t.content.dataRowsHint}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={(content.dataRows?.length || 0) >= 6}
+                onClick={() => {
+                  const current: DataCardRow[] = content.dataRows ? [...content.dataRows] : [];
+                  if (current.length >= 6) return;
+                  current.push({
+                    id: `row-${Date.now()}-${current.length + 1}`,
+                    label: '',
+                    value: '',
+                    delta: '',
+                  });
+                  onChangeContent({ dataRows: current });
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 hover:border-zinc-500 disabled:opacity-40 whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                <span>{t.content.addDataRow}</span>
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {(content.dataRows || []).map((row, idx) => (
+                <div key={row.id} className="grid grid-cols-12 gap-1.5 items-center">
+                  <input
+                    type="text"
+                    dir={content.direction}
+                    value={row.label}
+                    onChange={(e) => {
+                      const next = (content.dataRows || []).map((r, i) =>
+                        i === idx ? { ...r, label: e.target.value } : r
+                      );
+                      onChangeContent({ dataRows: next });
+                    }}
+                    placeholder={t.content.rowLabelPlaceholder}
+                    className="col-span-5 px-2.5 py-1.5 text-xs rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-red-600"
+                  />
+                  <input
+                    type="text"
+                    value={row.value}
+                    onChange={(e) => {
+                      const next = (content.dataRows || []).map((r, i) =>
+                        i === idx ? { ...r, value: e.target.value } : r
+                      );
+                      onChangeContent({ dataRows: next });
+                    }}
+                    placeholder={t.content.rowValuePlaceholder}
+                    className="col-span-3 px-2 py-1.5 text-xs font-mono-tabular rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-red-600"
+                  />
+                  <input
+                    type="text"
+                    value={row.delta || ''}
+                    onChange={(e) => {
+                      const next = (content.dataRows || []).map((r, i) =>
+                        i === idx ? { ...r, delta: e.target.value } : r
+                      );
+                      onChangeContent({ dataRows: next });
+                    }}
+                    placeholder={t.content.rowDeltaPlaceholder}
+                    className="col-span-3 px-2 py-1.5 text-xs font-mono-tabular rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-red-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = (content.dataRows || []).filter((_, i) => i !== idx);
+                      onChangeContent({ dataRows: next });
+                    }}
+                    aria-label={t.actions.deleteSlide}
+                    className="col-span-1 flex items-center justify-center p-1.5 text-zinc-400 hover:text-red-600 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Video Thumbnail Framing Hint */}
+        {activeLayoutId === 'thumbnail' && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/60 text-[11px] text-zinc-600 dark:text-zinc-400">
+            <Film className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+            <span>{t.content.thumbnailHint}</span>
+          </div>
+        )}
+
         {/* Source & Credit */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -601,6 +740,75 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
                 }`}
               />
             </button>
+          </div>
+
+          <div className="pt-2.5 border-t border-zinc-200/80 dark:border-zinc-800 space-y-2.5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                  <Calendar className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                  <span>{t.content.dateBadgeTitle}</span>
+                </div>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  {t.content.gregorianDefault}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={Boolean(content.showDateBadge)}
+                aria-label={t.content.showDateBadge}
+                onClick={() => onChangeContent({ showDateBadge: !content.showDateBadge })}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer mt-0.5 ${
+                  content.showDateBadge ? 'bg-red-600' : 'bg-zinc-300 dark:bg-zinc-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-xs transition-transform ${
+                    content.showDateBadge ? 'translate-x-4.5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {content.showDateBadge && (
+              <div className="space-y-2 pl-0.5">
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(content.includeBengaliDate)}
+                      onChange={(e) => onChangeContent({ includeBengaliDate: e.target.checked })}
+                      className="w-3.5 h-3.5 rounded border-zinc-300 accent-red-600"
+                    />
+                    <span className="text-[11px] text-zinc-700 dark:text-zinc-300">
+                      {t.content.appendBengaliDate}
+                    </span>
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(content.includeHijriDate)}
+                      onChange={(e) => onChangeContent({ includeHijriDate: e.target.checked })}
+                      className="w-3.5 h-3.5 rounded border-zinc-300 accent-red-600"
+                    />
+                    <span className="text-[11px] text-zinc-700 dark:text-zinc-300">
+                      {t.content.appendHijriDate}
+                    </span>
+                  </label>
+                </div>
+                <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300 truncate">
+                  {formatCardDateBadge(
+                    {
+                      showDateBadge: true,
+                      includeBengaliDate: content.includeBengaliDate,
+                      includeHijriDate: content.includeHijriDate,
+                    },
+                    lang
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="pt-2.5 border-t border-zinc-200/80 dark:border-zinc-800 space-y-2">
@@ -706,6 +914,33 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
           </span>
 
           <div className="flex items-center gap-1.5">
+            {/* Auto-Detect Script (RTL Arabic/Urdu, Devanagari, Bengali, Latin) */}
+            <button
+              type="button"
+              onClick={() => {
+                const detected = detectScriptAndDirection(
+                  `${content.headline} ${content.body} ${content.hook}`
+                );
+                const nextTypo: TypographySettings = detected.suggestedFont
+                  ? {
+                      ...typography,
+                      headline: { ...typography.headline, fontFamily: detected.suggestedFont },
+                      body: { ...typography.body, fontFamily: detected.suggestedFont },
+                    }
+                  : typography;
+                onChangeContent({
+                  direction: detected.direction,
+                  typography: nextTypo,
+                });
+                onNotify(`${t.messages.scriptDetectedPrefix}: ${detected.scriptLabel}`);
+              }}
+              title={t.content.autoDetectScript}
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400 transition-colors cursor-pointer"
+            >
+              <Languages className="w-3 h-3 text-red-600 shrink-0" />
+              <span className="hidden sm:inline">{t.content.autoDetectScript}</span>
+            </button>
+
             {/* LTR / RTL Direction Toggle */}
             <div className="inline-flex items-center p-0.5 rounded-md bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
               <button

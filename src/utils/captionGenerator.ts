@@ -69,6 +69,16 @@ export function generateSocialCaption(params: {
       lines.push('');
       lines.push(c.body.trim());
     }
+    if (activeSlide.layoutId === 'data-card' && c.dataRows && c.dataRows.length > 0) {
+      const validRows = c.dataRows.filter((r) => r.label.trim() || r.value.trim());
+      if (validRows.length > 0) {
+        lines.push('');
+        validRows.forEach((row) => {
+          const deltaPart = row.delta?.trim() ? ` (${row.delta.trim()})` : '';
+          lines.push(`• ${row.label.trim()}: ${row.value.trim()}${deltaPart}`);
+        });
+      }
+    }
     if (c.showWarning && c.warning.trim()) {
       lines.push('');
       lines.push(`⚠ ${c.warning.trim()}`);

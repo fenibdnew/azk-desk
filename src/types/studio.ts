@@ -17,7 +17,14 @@ export const ALL_ASPECT_RATIOS: AspectRatio[] = [
   '1280x720',
 ];
 
-export type CardLayoutId = 'editorial' | 'split' | 'breaking' | 'quote';
+export type CardLayoutId = 'editorial' | 'split' | 'breaking' | 'quote' | 'data-card' | 'thumbnail';
+
+export interface DataCardRow {
+  id: string;
+  label: string;
+  value: string;
+  delta?: string;
+}
 
 export type CornerPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
@@ -151,6 +158,10 @@ export interface CardContent {
   category: string;
   credit: string;
   showVerifiedRssStamp?: boolean;
+  showDateBadge?: boolean;
+  includeBengaliDate?: boolean;
+  includeHijriDate?: boolean;
+  dataRows?: DataCardRow[];
   warning: string;
   showWarning: boolean;
   headlineSize: number;
@@ -436,7 +447,14 @@ export function validateAndMergeDailyConfig(raw: unknown, fallback: DailyConfig)
     }
   }
 
-  const validLayoutIds: CardLayoutId[] = ['editorial', 'split', 'breaking', 'quote'];
+  const validLayoutIds: CardLayoutId[] = [
+    'editorial',
+    'split',
+    'breaking',
+    'quote',
+    'data-card',
+    'thumbnail',
+  ];
   let layoutPresets = fallback.layoutPresets;
   if (Array.isArray(obj.layoutPresets)) {
     const validLayouts: LayoutPresetOption[] = [];

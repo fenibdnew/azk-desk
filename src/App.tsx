@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   Archive,
   ArrowLeft,
   ArrowRight,
   Check,
+  CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -35,6 +37,7 @@ import {
   CardLayoutId,
   CustomFontAsset,
   DailyConfig,
+  DataCardRow,
   ExportedPresetPayload,
   ExportScale,
   isSafeMediaUrl,
@@ -57,6 +60,7 @@ import { UI_STRINGS } from './data/i18n';
 import { loadCanvasImage } from './utils/imageLoader';
 import { getCanvasDimensions, renderNewsCard } from './utils/canvasRenderer';
 import { generateSocialCaption } from './utils/captionGenerator';
+import { analyzePostClarity } from './utils/postClarityAnalyzer';
 import { matchCopyrightSafeVisual } from './utils/safeVisualMatcher';
 import { canvasToPngBytes, createZipBlob, triggerBlobDownload } from './utils/zipBuilder';
 import {
@@ -293,6 +297,10 @@ function createInitialSlide(): SlideData {
       source: starter.source,
       credit: starter.credit,
       showVerifiedRssStamp: false,
+      showDateBadge: false,
+      includeBengaliDate: false,
+      includeHijriDate: false,
+      dataRows: [],
       warning: starter.warning,
       showWarning: Boolean(starter.warning),
       headlineSize: 64,
@@ -303,6 +311,21 @@ function createInitialSlide(): SlideData {
     },
     background: createDefaultBackground(STUDIO_BACKDROPS[0].url),
   };
+}
+
+function sanitizeDataRows(rawRows: unknown, fallback?: DataCardRow[]): DataCardRow[] {
+  if (!Array.isArray(rawRows)) return fallback ? [...fallback] : [];
+  return rawRows
+    .slice(0, 6)
+    .map((entry, idx) => {
+      const r = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+      return {
+        id: sanitizePlainText(r.id, 40, `row-${Date.now()}-${idx + 1}`),
+        label: sanitizePlainText(r.label, 60, ''),
+        value: sanitizePlainText(r.value, 40, ''),
+        delta: sanitizePlainText(r.delta, 30, ''),
+      };
+    });
 }
 
 function sanitizeCardContent(rawContent: unknown, fallback: CardContent): CardContent {
@@ -327,6 +350,17 @@ function sanitizeCardContent(rawContent: unknown, fallback: CardContent): CardCo
       typeof c.showVerifiedRssStamp === 'boolean'
         ? c.showVerifiedRssStamp
         : Boolean(fallback.showVerifiedRssStamp),
+    showDateBadge:
+      typeof c.showDateBadge === 'boolean' ? c.showDateBadge : Boolean(fallback.showDateBadge),
+    includeBengaliDate:
+      typeof c.includeBengaliDate === 'boolean'
+        ? c.includeBengaliDate
+        : Boolean(fallback.includeBengaliDate),
+    includeHijriDate:
+      typeof c.includeHijriDate === 'boolean'
+        ? c.includeHijriDate
+        : Boolean(fallback.includeHijriDate),
+    dataRows: sanitizeDataRows(c.dataRows, fallback.dataRows),
     warning: sanitizePlainText(c.warning, 160, fallback.warning),
     showWarning: typeof c.showWarning === 'boolean' ? c.showWarning : fallback.showWarning,
     headlineSize:
@@ -543,7 +577,14 @@ function loadAutosavedDraft(fallbackConfig: DailyConfig): {
       };
     }
 
-    const validLayouts: CardLayoutId[] = ['editorial', 'split', 'breaking', 'quote'];
+    const validLayouts: CardLayoutId[] = [
+      'editorial',
+      'split',
+      'breaking',
+      'quote',
+      'data-card',
+      'thumbnail',
+    ];
     const validCorners: BrandSettings['logoCorner'][] = [
       'top-left',
       'top-right',
@@ -814,53 +855,57 @@ export default function App() {
     safeWriteStorage(STORAGE_KEYS.exportScale, String(exportScale));
   }, [exportScale]);
 
+  const saveDraftNow = useCallback((): boolean => {
+    const payload: AutosavedDraftPayload = {
+      aspectRatio,
+      activeSlideIndex: safeActiveIndex,
+      slides,
+      brand,
+      watermark,
+    };
+    let saved = safeWriteStorage(STORAGE_KEYS.autosavedDraft, JSON.stringify(payload));
+    if (!saved) {
+      const compactPayload: AutosavedDraftPayload = {
+        aspectRatio,
+        activeSlideIndex: safeActiveIndex,
+        slides: slides.map((sl) => ({
+          ...sl,
+          background: {
+            ...sl.background,
+            imageUrl: sl.background.imageUrl.startsWith('data:image/')
+              ? STUDIO_BACKDROPS[0].url
+              : sl.background.imageUrl,
+          },
+        })),
+        brand: {
+          ...brand,
+          logoUrl: brand.logoUrl.startsWith('data:image/') ? '' : brand.logoUrl,
+        },
+        watermark: {
+          ...watermark,
+          logoUrl: watermark.logoUrl.startsWith('data:image/') ? '' : watermark.logoUrl,
+        },
+      };
+      saved = safeWriteStorage(STORAGE_KEYS.autosavedDraft, JSON.stringify(compactPayload));
+    }
+    if (saved) {
+      setDraftSavedAt(
+        new Date().toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      );
+    }
+    return saved;
+  }, [aspectRatio, safeActiveIndex, slides, brand, watermark, lang]);
+
   // Automatic local draft saving (debounced 600ms with quota-safe fallback for large device photos)
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const payload: AutosavedDraftPayload = {
-        aspectRatio,
-        activeSlideIndex: safeActiveIndex,
-        slides,
-        brand,
-        watermark,
-      };
-      let saved = safeWriteStorage(STORAGE_KEYS.autosavedDraft, JSON.stringify(payload));
-      if (!saved) {
-        // Fallback: preserve all text/layout/backdrop settings while omitting oversized local data URLs
-        const compactPayload: AutosavedDraftPayload = {
-          aspectRatio,
-          activeSlideIndex: safeActiveIndex,
-          slides: slides.map((sl) => ({
-            ...sl,
-            background: {
-              ...sl.background,
-              imageUrl: sl.background.imageUrl.startsWith('data:image/')
-                ? STUDIO_BACKDROPS[0].url
-                : sl.background.imageUrl,
-            },
-          })),
-          brand: {
-            ...brand,
-            logoUrl: brand.logoUrl.startsWith('data:image/') ? '' : brand.logoUrl,
-          },
-          watermark: {
-            ...watermark,
-            logoUrl: watermark.logoUrl.startsWith('data:image/') ? '' : watermark.logoUrl,
-          },
-        };
-        saved = safeWriteStorage(STORAGE_KEYS.autosavedDraft, JSON.stringify(compactPayload));
-      }
-      if (saved) {
-        setDraftSavedAt(
-          new Date().toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        );
-      }
+      saveDraftNow();
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [aspectRatio, safeActiveIndex, slides, brand, watermark, lang]);
+  }, [saveDraftNow]);
 
   // Re-render canvas once Google Fonts & any saved custom fonts finish loading
   useEffect(() => {
@@ -990,6 +1035,7 @@ export default function App() {
       watermarkLogoImage: wmLogoImgEl,
       slideIndex: safeActiveIndex,
       totalSlides: slides.length,
+      lang,
     });
   }, [
     aspectRatio,
@@ -1003,6 +1049,7 @@ export default function App() {
     safeActiveIndex,
     slides.length,
     fontsLoadedTick,
+    lang,
   ]);
 
   const applyDailyConfig = useCallback((incoming: DailyConfig, currentLang: Language) => {
@@ -1283,6 +1330,65 @@ export default function App() {
       };
     });
     notify(t.messages.quotePresetApplied);
+  };
+
+  // 1-click Universal Data / Market Rate Card preset
+  const handleApplyDataCardPreset = () => {
+    const starterRows: DataCardRow[] =
+      lang === 'bn'
+        ? [
+            { id: 'dr-1', label: 'USD / BDT রেট', value: '৳১২০.৫০', delta: '+০.২%' },
+            { id: 'dr-2', label: 'স্বর্ণ (২২ ক্যারেট)', value: '৳১,৪২,৮০০', delta: '+১.১%' },
+            { id: 'dr-3', label: 'ব্রেন্ট অপরিশোধিত তেল', value: '$৭৪.৮০', delta: '-০.৬%' },
+            { id: 'dr-4', label: 'বৈশ্বিক টেক সূচক', value: '১৮,৪২০', delta: '+০.৯%' },
+          ]
+        : [
+            { id: 'dr-1', label: 'EUR / USD', value: '1.0842', delta: '+0.32%' },
+            { id: 'dr-2', label: 'Gold (1 oz)', value: '$2,645', delta: '+1.14%' },
+            { id: 'dr-3', label: 'Brent Crude', value: '$74.80', delta: '-0.65%' },
+            { id: 'dr-4', label: 'Global Tech Index', value: '18,420', delta: '+0.88%' },
+          ];
+
+    updateActiveSlide((prev) => {
+      const hasRows = prev.content.dataRows && prev.content.dataRows.length > 0;
+      const isDefaultHeadline =
+        !prev.content.headline.trim() ||
+        DEFAULT_DAILY_CONFIG.storyPresets.some((sp) => sp.headline === prev.content.headline.trim());
+      return {
+        ...prev,
+        layoutId: 'data-card',
+        content: {
+          ...prev.content,
+          category: lang === 'bn' ? 'দৈনিক বাজার ও ডেটা' : 'Market & Data Brief',
+          hook:
+            prev.content.hook.trim() ||
+            (lang === 'bn' ? 'আজকের প্রধান সূচক ও হার' : 'TODAY’S KEY GLOBAL BENCHMARKS'),
+          headline: isDefaultHeadline
+            ? lang === 'bn'
+              ? 'মুদ্রা, স্বর্ণ ও বৈশ্বিক বাজারের সর্বশেষ চিত্র'
+              : 'Global Currency, Commodity & Market Snapshot'
+            : prev.content.headline,
+          dataRows: hasRows ? prev.content.dataRows : starterRows,
+          showDateBadge: true,
+        },
+      };
+    });
+    notify(t.messages.dataCardPresetApplied);
+  };
+
+  // 1-click Video / YouTube Thumbnail (16:9) preset with drop-shadow framed photo panel
+  const handleApplyThumbnailPreset = () => {
+    setAspectRatio('1280x720');
+    updateActiveSlide((prev) => ({
+      ...prev,
+      layoutId: 'thumbnail',
+      content: {
+        ...prev.content,
+        category: prev.content.category.trim() || (lang === 'bn' ? 'বিশেষ বিশ্লেষণ' : 'EXPLAINER'),
+        textAlign: 'left',
+      },
+    }));
+    notify(t.messages.thumbnailPresetApplied);
   };
 
   // Resolve & apply a 100% copyright-safe visual (Wikimedia PD/CC0 or built-in editorial backdrop)
@@ -1681,6 +1787,137 @@ export default function App() {
     notify(t.messages.profileDeleted);
   };
 
+  const handleExportProfilesBackup = () => {
+    if (savedProfiles.length === 0) return;
+    const payload = {
+      type: 'azk-desk-brand-profiles',
+      exportedAt: new Date().toISOString(),
+      profiles: savedProfiles,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    triggerBlobDownload(blob, `azk-desk-brand-profiles-${new Date().toISOString().slice(0, 10)}.json`);
+    notify(t.messages.profilesBackupExported);
+  };
+
+  const handleImportProfilesBackup = (file: File) => {
+    if (file.size > 5 * 1024 * 1024) {
+      notify(t.messages.profilesBackupError, 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const raw = safeJsonParse<Record<string, unknown> | unknown[]>(String(reader.result || ''));
+        const list = Array.isArray(raw)
+          ? raw
+          : raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).profiles)
+            ? ((raw as Record<string, unknown>).profiles as unknown[])
+            : null;
+        if (!list || list.length === 0) {
+          notify(t.messages.profilesBackupError, 'error');
+          return;
+        }
+
+        const sanitizedIncoming: SavedBrandProfile[] = [];
+        for (const entry of list.slice(0, 15)) {
+          if (!entry || typeof entry !== 'object') continue;
+          const p = entry as Record<string, unknown>;
+          if (!p.brand || typeof p.brand !== 'object' || !p.watermark || typeof p.watermark !== 'object') {
+            continue;
+          }
+          const b = p.brand as Record<string, unknown>;
+          const w = p.watermark as Record<string, unknown>;
+          const validCorners: BrandSettings['logoCorner'][] = [
+            'top-left',
+            'top-right',
+            'bottom-left',
+            'bottom-right',
+          ];
+          sanitizedIncoming.push({
+            id: sanitizePlainText(p.id, 60, `profile-${Date.now()}-${sanitizedIncoming.length}`),
+            name: sanitizePlainText(p.name, 60, 'Imported Profile'),
+            updatedAt: new Date().toISOString(),
+            themeId: sanitizePlainText(p.themeId, 40, config.themes[0].id),
+            brand: {
+              brandName: sanitizePlainText(b.brandName, 80, 'AZK DESK'),
+              brandHandle: sanitizePlainText(b.brandHandle, 60, '@azkdesk'),
+              showBrandHandle: typeof b.showBrandHandle === 'boolean' ? b.showBrandHandle : true,
+              logoUrl:
+                typeof b.logoUrl === 'string' && (b.logoUrl === '' || isSafeMediaUrl(b.logoUrl))
+                  ? b.logoUrl
+                  : '',
+              logoSize:
+                typeof b.logoSize === 'number' && Number.isFinite(b.logoSize)
+                  ? Math.min(220, Math.max(48, Math.round(b.logoSize)))
+                  : 96,
+              logoOpacity:
+                typeof b.logoOpacity === 'number' && Number.isFinite(b.logoOpacity)
+                  ? Math.min(100, Math.max(10, Math.round(b.logoOpacity)))
+                  : 100,
+              logoCorner: validCorners.includes(b.logoCorner as BrandSettings['logoCorner'])
+                ? (b.logoCorner as BrandSettings['logoCorner'])
+                : 'top-left',
+              logoPadding:
+                typeof b.logoPadding === 'number' && Number.isFinite(b.logoPadding)
+                  ? Math.min(96, Math.max(24, Math.round(b.logoPadding)))
+                  : 54,
+              showBrandWordmark:
+                typeof b.showBrandWordmark === 'boolean' ? b.showBrandWordmark : true,
+            },
+            watermark: {
+              enabled: typeof w.enabled === 'boolean' ? w.enabled : true,
+              source: w.source === 'logo' || w.source === 'text' ? w.source : 'text',
+              text: sanitizePlainText(w.text, 80, '@azkdesk'),
+              logoUrl:
+                typeof w.logoUrl === 'string' && (w.logoUrl === '' || isSafeMediaUrl(w.logoUrl))
+                  ? w.logoUrl
+                  : '',
+              opacity:
+                typeof w.opacity === 'number' && Number.isFinite(w.opacity)
+                  ? Math.min(80, Math.max(5, Math.round(w.opacity)))
+                  : 22,
+              angle:
+                typeof w.angle === 'number' && Number.isFinite(w.angle)
+                  ? Math.min(60, Math.max(-60, Math.round(w.angle)))
+                  : -24,
+              mode: w.mode === 'tiled' || w.mode === 'corner' ? w.mode : 'corner',
+              corner: validCorners.includes(w.corner as WatermarkSettings['corner'])
+                ? (w.corner as WatermarkSettings['corner'])
+                : 'top-right',
+              tileSpacing:
+                typeof w.tileSpacing === 'number' && Number.isFinite(w.tileSpacing)
+                  ? Math.min(480, Math.max(180, Math.round(w.tileSpacing)))
+                  : 300,
+            },
+            typography: p.typography ? mergeTypography(p.typography) : undefined,
+          });
+        }
+
+        if (sanitizedIncoming.length === 0) {
+          notify(t.messages.profilesBackupError, 'error');
+          return;
+        }
+
+        const merged = [...sanitizedIncoming];
+        for (const existing of savedProfiles) {
+          if (!merged.some((m) => m.name.toLowerCase() === existing.name.toLowerCase())) {
+            merged.push(existing);
+          }
+        }
+        const capped = merged.slice(0, 15);
+        if (!persistProfiles(capped)) {
+          notify(t.messages.profileStorageFull, 'error');
+          return;
+        }
+        setSavedProfiles(capped);
+        notify(`${t.messages.profilesBackupImported} (${sanitizedIncoming.length})`);
+      } catch {
+        notify(t.messages.profilesBackupError, 'error');
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const workspaceCaption = useMemo(() => {
     return generateSocialCaption({
       slides,
@@ -1690,6 +1927,10 @@ export default function App() {
       lang,
     });
   }, [slides, safeActiveIndex, captionBoxScope, brand, lang]);
+
+  const clarityReport = useMemo(() => {
+    return analyzePostClarity(activeSlide, workspaceCaption, lang);
+  }, [activeSlide, workspaceCaption, lang]);
 
   const handleQuickCopyCaption = async (overrideText?: string) => {
     const text =
@@ -1744,6 +1985,7 @@ export default function App() {
         watermarkLogoImage: wmLogoImgEl,
         slideIndex: safeActiveIndex,
         totalSlides: slides.length,
+        lang,
       });
 
       const ok = await downloadCanvasBlob(
@@ -1759,6 +2001,46 @@ export default function App() {
       setExporting(false);
     }
   };
+
+  // Global keyboard shortcuts: Ctrl/Cmd+S (save), Ctrl/Cmd+E (export PNG), Ctrl/Cmd+Left/Right (slide switch)
+  const shortcutExportRef = useRef(handleDownloadActivePng);
+  shortcutExportRef.current = handleDownloadActivePng;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 's') {
+        e.preventDefault();
+        saveDraftNow();
+        notify(t.messages.draftSavedManual);
+        return;
+      }
+      if (key === 'e') {
+        e.preventDefault();
+        void shortcutExportRef.current();
+        return;
+      }
+
+      const target = e.target as HTMLElement | null;
+      const isEditingField =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable);
+      if (isEditingField || slides.length <= 1) return;
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setActiveSlideIndex((prev) => (prev > 0 ? prev - 1 : slides.length - 1));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setActiveSlideIndex((prev) => (prev < slides.length - 1 ? prev + 1 : 0));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [saveDraftNow, notify, t.messages.draftSavedManual, slides.length]);
 
   // Sequential high-res PNG export for all 1..7 slides without UI clipping or memory leaks
   const handleExportAllSlides = async () => {
@@ -1798,6 +2080,7 @@ export default function App() {
           watermarkLogoImage: loadedWmLogo,
           slideIndex: i,
           totalSlides: slides.length,
+          lang,
         });
 
         const ok = await downloadCanvasBlob(
@@ -1861,6 +2144,7 @@ export default function App() {
           watermarkLogoImage: loadedWmLogo,
           slideIndex: i,
           totalSlides: slides.length,
+          lang,
         });
 
         const pngBytes = await canvasToPngBytes(offscreen);
@@ -2008,7 +2292,14 @@ export default function App() {
             }
 
             if (Array.isArray(c.slides) && c.slides.length > 0) {
-              const validLayouts: CardLayoutId[] = ['editorial', 'split', 'breaking', 'quote'];
+              const validLayouts: CardLayoutId[] = [
+                'editorial',
+                'split',
+                'breaking',
+                'quote',
+                'data-card',
+                'thumbnail',
+              ];
               const importedSlides: SlideData[] = c.slides
                 .slice(0, MAX_SLIDES)
                 .map((entry: unknown, i: number) => {
@@ -2030,7 +2321,14 @@ export default function App() {
               setSlides(importedSlides);
               setActiveSlideIndex(0);
             } else {
-              const validLayouts: CardLayoutId[] = ['editorial', 'split', 'breaking', 'quote'];
+              const validLayouts: CardLayoutId[] = [
+                'editorial',
+                'split',
+                'breaking',
+                'quote',
+                'data-card',
+                'thumbnail',
+              ];
               updateActiveSlide((prev) => ({
                 ...prev,
                 layoutId: validLayouts.includes(c.layoutId as CardLayoutId)
@@ -2210,6 +2508,8 @@ export default function App() {
                 storyPresets={config.storyPresets}
                 onApplyStoryPreset={handleApplyStoryPreset}
                 onApplyQuotePreset={handleApplyQuotePreset}
+                onApplyDataCardPreset={handleApplyDataCardPreset}
+                onApplyThumbnailPreset={handleApplyThumbnailPreset}
                 onApplyRawNews={handleApplyRawNewsToActiveSlide}
                 watermark={watermark}
                 onChangeWatermark={(patch) => setWatermark((prev) => ({ ...prev, ...patch }))}
@@ -2262,6 +2562,8 @@ export default function App() {
                 onSaveProfile={handleSaveBrandProfile}
                 onApplyProfile={handleApplyBrandProfile}
                 onDeleteProfile={handleDeleteBrandProfile}
+                onExportProfilesBackup={handleExportProfilesBackup}
+                onImportProfilesBackup={handleImportProfilesBackup}
                 onNotify={notify}
               />
             )}
@@ -2546,7 +2848,7 @@ export default function App() {
                     aria-label="Live news card canvas preview"
                   />
 
-                  {/* Optional Non-Exported Ratio-Aware Social Feed Safe-Zone Guides */}
+                  {/* Optional Non-Exported Ratio-Aware Global Platform Safe-Zone Guides */}
                   {showSafeZones && (
                     <div
                       aria-hidden="true"
@@ -2562,12 +2864,33 @@ export default function App() {
                       <div className="absolute top-0 bottom-0 left-1/2 w-px bg-sky-400/35" />
                       <div className="absolute left-0 right-0 top-1/2 h-px bg-sky-400/35" />
 
-                      {/* 9:16 Story / Reels top profile & progress UI clearance */}
+                      {/* Ratio-specific platform safe-zone label */}
+                      <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded bg-black/75 text-[10px] font-semibold tracking-wide text-sky-300 whitespace-nowrap">
+                        {aspectRatio === '1080x1920'
+                          ? t.canvas.safeZoneReels916
+                          : aspectRatio === '1080x1350'
+                            ? t.canvas.safeZoneFeed45
+                            : aspectRatio === '1280x720'
+                              ? t.canvas.safeZoneVideo169
+                              : t.canvas.safeZoneSquare11}
+                      </div>
+
+                      {/* 9:16 Reels / Shorts / TikTok top status + right action-rail clearance */}
                       {aspectRatio === '1080x1920' && (
-                        <div className="absolute left-0 right-0 top-0 h-[13.5%] border-b border-dashed border-amber-400/80 bg-amber-400/10" />
+                        <>
+                          <div className="absolute left-0 right-0 top-0 h-[13.5%] border-b border-dashed border-amber-400/80 bg-amber-400/10" />
+                          <div className="absolute right-0 top-[42%] bottom-[19%] w-[14%] border-l border-t border-b border-dashed border-amber-400/80 bg-amber-400/10" />
+                        </>
                       )}
 
-                      {/* Lower UI / lower-third clearance band adapted per aspect ratio */}
+                      {/* 16:9 YouTube / Video duration timestamp clearance box (bottom-right) */}
+                      {aspectRatio === '1280x720' && (
+                        <div className="absolute right-[3%] bottom-[4%] w-[14%] h-[11%] rounded border border-dashed border-rose-400/90 bg-rose-500/20 flex items-center justify-center text-[9px] font-mono font-bold text-rose-200">
+                          12:34
+                        </div>
+                      )}
+
+                      {/* Lower UI / caption clearance band adapted per aspect ratio */}
                       <div
                         className={`absolute left-0 right-0 bottom-0 border-t border-dashed border-amber-400/80 bg-amber-400/10 ${
                           aspectRatio === '1080x1920'
@@ -2785,7 +3108,7 @@ export default function App() {
               </div>
 
               {captionBoxOpen && (
-                <div className="p-2.5">
+                <div className="p-2.5 space-y-2.5">
                   <textarea
                     readOnly
                     rows={3}
@@ -2793,6 +3116,55 @@ export default function App() {
                     aria-label={t.canvas.captionDrawerTitle}
                     className="w-full px-2.5 py-2 text-xs leading-relaxed rounded-lg border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 focus:outline-none resize-y"
                   />
+
+                  {/* 100% Local Post Clarity & Reach Check */}
+                  <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80 space-y-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-zinc-700 dark:text-zinc-300">
+                        {clarityReport.grade === 'optimal' ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                        )}
+                        <span>{t.canvas.clarityTitle}</span>
+                      </span>
+                      <span
+                        className={`font-semibold tabular-nums ${
+                          clarityReport.grade === 'optimal'
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : clarityReport.grade === 'review'
+                              ? 'text-amber-700 dark:text-amber-400'
+                              : 'text-red-600 dark:text-red-400'
+                        }`}
+                      >
+                        {clarityReport.score}/100 ·{' '}
+                        {clarityReport.grade === 'optimal'
+                          ? t.canvas.clarityOptimal
+                          : clarityReport.grade === 'review'
+                            ? t.canvas.clarityReview
+                            : t.canvas.clarityRisk}
+                      </span>
+                    </div>
+
+                    {clarityReport.issues.length === 0 ? (
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {t.canvas.clarityAllClear}
+                      </p>
+                    ) : (
+                      <ul className="space-y-1 text-[11px] text-zinc-600 dark:text-zinc-400">
+                        {clarityReport.issues.map((issue) => (
+                          <li key={issue.id} className="flex items-start gap-1.5 leading-snug">
+                            <span
+                              className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${
+                                issue.severity === 'warn' ? 'bg-amber-500' : 'bg-sky-500'
+                              }`}
+                            />
+                            <span>{issue.message}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -2859,6 +3231,8 @@ export default function App() {
                     <span aria-hidden="true">·</span>
                   </>
                 )}
+                <span className="hidden xl:inline">{t.canvas.shortcutsHint}</span>
+                <span className="hidden xl:inline" aria-hidden="true">·</span>
                 <span>
                   {showSafeZones
                     ? t.canvas.safeZoneNote

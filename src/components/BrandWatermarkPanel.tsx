@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { BookmarkPlus, Check, Copy, Trash2, Upload } from 'lucide-react';
+import { BookmarkPlus, Check, Copy, Download, Trash2, Upload } from 'lucide-react';
 import {
   BrandSettings,
   CardTheme,
@@ -27,6 +27,8 @@ interface BrandWatermarkPanelProps {
   onSaveProfile: (name: string) => void;
   onApplyProfile: (profile: SavedBrandProfile) => void;
   onDeleteProfile: (id: string) => void;
+  onExportProfilesBackup: () => void;
+  onImportProfilesBackup: (file: File) => void;
   onNotify: (msg: string, tone?: 'info' | 'error') => void;
 }
 
@@ -47,10 +49,13 @@ export const BrandWatermarkPanel: React.FC<BrandWatermarkPanelProps> = ({
   onSaveProfile,
   onApplyProfile,
   onDeleteProfile,
+  onExportProfilesBackup,
+  onImportProfilesBackup,
   onNotify,
 }) => {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const wmLogoInputRef = useRef<HTMLInputElement>(null);
+  const profileBackupInputRef = useRef<HTMLInputElement>(null);
   const [captionScope, setCaptionScope] = useState<'active' | 'all'>('active');
   const [copiedCaption, setCopiedCaption] = useState(false);
   const [profileNameInput, setProfileNameInput] = useState('');
@@ -216,6 +221,38 @@ export const BrandWatermarkPanel: React.FC<BrandWatermarkPanelProps> = ({
             })}
           </div>
         )}
+
+        {/* Export / Import Brand Profiles Backup (.json) */}
+        <div className="flex items-center gap-2 pt-1">
+          <input
+            ref={profileBackupInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) onImportProfilesBackup(file);
+              e.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            disabled={savedProfiles.length === 0}
+            onClick={onExportProfilesBackup}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400 disabled:opacity-40 transition-colors cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t.brand.exportProfilesBackup}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => profileBackupInputRef.current?.click()}
+            className="flex-1 inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400 transition-colors cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">{t.brand.importProfilesBackup}</span>
+          </button>
+        </div>
       </div>
 
       {/* Brand Identity & Direct Local Logo Upload */}
