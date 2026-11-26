@@ -7,6 +7,9 @@ import {
   ClipboardPaste,
   Clock,
   Globe,
+  Layers,
+  Lightbulb,
+  Loader2,
   Plus,
   Radio,
   RefreshCw,
@@ -14,6 +17,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  TrendingUp,
   Volume2,
   VolumeX,
   Wand2,
@@ -26,9 +30,16 @@ import {
   RssCountryId,
   RssFeedResponse,
   RssNewsItem,
+  VisualLicenseInfo,
 } from '../types/studio';
 import { UIStrings } from '../data/i18n';
 import { parseRawNewsText } from '../utils/newsTextParser';
+import {
+  analyzeNewsFeed,
+  generateEthicalHookIdeas,
+  NewsQuickFilter,
+  sortNewsNewestFirst,
+} from '../utils/newsIntelligence';
 import {
   safeJsonParse,
   sanitizeCustomFeedUrl,
@@ -41,9 +52,14 @@ interface RssNewsPanelProps {
   activeSlideIndex: number;
   canAddSlide: boolean;
   activeBreakingItemId: string | null;
-  onApplyNewsToSlide: (item: RssNewsItem) => void;
+  autoMatchSafeVisual: boolean;
+  onToggleAutoMatchSafeVisual: (enabled: boolean) => void;
+  matchingVisual: boolean;
+  activeVisualLicense?: VisualLicenseInfo;
+  onApplyNewsToSlide: (item: RssNewsItem, customHook?: string) => void;
   onToggleBreakingNewsOnSlide: (item: RssNewsItem, enableBreaking: boolean) => void;
   onAddNewsAsSlide: (item: RssNewsItem) => void;
+  onBuildCarouselFromNews: (items: RssNewsItem[]) => void;
   onApplyRawNewsToSlide: (parsed: ParsedRawNews) => void;
   onAddRawNewsAsSlide: (parsed: ParsedRawNews) => void;
   onNewHeadlinesCountChange?: (count: number) => void;
@@ -129,6 +145,29 @@ function writePref(key: string, value: string): void {
 
 function getHeadlineFingerprint(item: RssNewsItem): string {
   return item.headline.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function dedupeRssItems(items: RssNewsItem[]): RssNewsItem[] {
+  const seen = new Set<string>();
+  const unique: RssNewsItem[] = [];
+  for (const item of items) {
+    const fp = getHeadlineFingerprint(item);
+    if (!fp || seen.has(fp)) continue;
+    seen.add(fp);
+    unique.push(item);
+  }
+  return unique;
+}
+
+function formatUpdatedBadge(iso: string | null, nowMs: number, t: UIStrings): string {
+  if (!iso) return '';
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return '';
+  const diffSec = Math.max(0, Math.floor((nowMs - ts) / 1000));
+  if (diffSec < 20) return t.news.updatedJustNow;
+  if (diffSec < 60) return `${diffSec}${t.news.updatedSecondsAgo}`;
+  const diffMin = Math.floor(diffSec / 60);
+  return `${diffMin}${t.news.updatedMinutesAgo}`;
 }
 
 function formatCountdown(totalSeconds: number): string {
@@ -272,9 +311,14 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
   activeSlideIndex,
   canAddSlide,
   activeBreakingItemId,
+  autoMatchSafeVisual,
+  onToggleAutoMatchSafeVisual,
+  matchingVisual,
+  activeVisualLicense,
   onApplyNewsToSlide,
   onToggleBreakingNewsOnSlide,
   onAddNewsAsSlide,
+  onBuildCarouselFromNews,
   onApplyRawNewsToSlide,
   onAddRawNewsAsSlide,
   onNewHeadlinesCountChange,
@@ -289,11 +333,21 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
   const [refreshing, setRefreshing] = useState(false);
   const [feed, setFeed] = useState<RssFeedResponse | null>(null);
   const [lastUpdatedIso, setLastUpdatedIso] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [appliedId, setAppliedId] = useState<string | null>(null);
   const [customFeedInput, setCustomFeedInput] = useState('');
   const [activeCustomFeedUrl, setActiveCustomFeedUrl] = useState<string | null>(null);
   const [savedCustomFeeds, setSavedCustomFeeds] = useState<string[]>(() => readSavedCustomFeeds());
   const [customFeedError, setCustomFeedError] = useState<string | null>(null);
+  const [selectedForCarousel, setSelectedForCarousel] = useState<RssNewsItem[]>([]);
+  const [quickFilter, setQuickFilter] = useState<NewsQuickFilter>('all');
+  const [selectedTopicKey, setSelectedTopicKey] = useState<string | null>(null);
+  const [openIdeasId, setOpenIdeasId] = useState<string | null>(null);
+  const [ideasLang, setIdeasLang] = useState<Language>(lang);
+
+  useEffect(() => {
+    setIdeasLang(lang);
+  }, [lang]);
 
   // Live Auto-Refresh & Alert state
   const [refreshInterval, setRefreshInterval] = useState<AutoRefreshInterval>(() =>
@@ -419,13 +473,19 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
         }
         const rawTextResp = await res.text();
         const sanitized = sanitizeRssFeedResponse(safeJsonParse(rawTextResp));
-        const resolvedFeed =
+        const baseFeed =
           sanitized && sanitized.items.length > 0
             ? sanitized
             : buildClientOfflineFallback(nextCountry, nextCategory, nextLang, tRef.current);
+        const resolvedFeed: RssFeedResponse = {
+          ...baseFeed,
+          items: sortNewsNewestFirst(dedupeRssItems(baseFeed.items)),
+        };
 
         setFeed(resolvedFeed);
-        setLastUpdatedIso(new Date().toISOString());
+        const nowIso = new Date().toISOString();
+        setLastUpdatedIso(nowIso);
+        setNowMs(Date.now());
 
         // Compare against previously seen headlines for this exact feed key
         const existingSeen = seenByFeedRef.current.get(feedKey);
@@ -499,6 +559,8 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
   useEffect(() => {
     setNewFingerprints(new Set());
     setDismissedFallback(false);
+    setSelectedTopicKey(null);
+    setOpenIdeasId(null);
     fetchFeed(country, category, feedLang, {
       forceRefresh: false,
       resetFeed: true,
@@ -542,6 +604,15 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
 
     return () => window.clearInterval(timer);
   }, [refreshInterval, country, category, feedLang, activeCustomFeedUrl, fetchFeed]);
+
+  // Keep relative "Updated just now" badge live even when auto-refresh is off
+  useEffect(() => {
+    if (!lastUpdatedIso) return;
+    const ticker = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 5000);
+    return () => window.clearInterval(ticker);
+  }, [lastUpdatedIso]);
 
   const handleIntervalChange = (nextVal: AutoRefreshInterval) => {
     setRefreshInterval(nextVal);
@@ -605,8 +676,53 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
     });
   };
 
+  const feedIntel = useMemo(() => {
+    return analyzeNewsFeed(feed?.items || [], nowMs);
+  }, [feed, nowMs]);
+
+  const quickFilterCounts = useMemo(() => {
+    let lastHour = 0;
+    let trending = 0;
+    let highImpact = 0;
+    for (const item of feedIntel.sortedItems) {
+      const meta = feedIntel.metaById.get(item.id);
+      if (meta?.isWithinLastHour) lastHour += 1;
+      if (meta?.isTrending) trending += 1;
+      if (meta?.isHighImpact) highImpact += 1;
+    }
+    return {
+      all: feedIntel.sortedItems.length,
+      lastHour,
+      trending,
+      highImpact,
+    };
+  }, [feedIntel]);
+
+  const activeTrendingTopic = useMemo(
+    () => feedIntel.trendingTopics.find((topic) => topic.key === selectedTopicKey) || null,
+    [feedIntel.trendingTopics, selectedTopicKey]
+  );
+
   const filteredItems = useMemo(() => {
-    const list = feed?.items || [];
+    let list = feedIntel.sortedItems;
+
+    if (quickFilter === 'last-hour') {
+      list = list.filter((item) => feedIntel.metaById.get(item.id)?.isWithinLastHour);
+    } else if (quickFilter === 'trending') {
+      list = list.filter((item) => feedIntel.metaById.get(item.id)?.isTrending);
+    } else if (quickFilter === 'high-impact') {
+      list = list.filter((item) => feedIntel.metaById.get(item.id)?.isHighImpact);
+    }
+
+    if (activeTrendingTopic) {
+      const topicNeedle = activeTrendingTopic.key.toLowerCase();
+      const labelNeedle = activeTrendingTopic.label.toLowerCase();
+      list = list.filter((item) => {
+        const hay = `${item.headline} ${item.summary} ${item.hook}`.toLowerCase();
+        return hay.includes(topicNeedle) || hay.includes(labelNeedle);
+      });
+    }
+
     const q = filterText.trim().toLowerCase();
     if (!q) return list;
     return list.filter(
@@ -616,11 +732,11 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
         item.hook.toLowerCase().includes(q) ||
         item.summary.toLowerCase().includes(q)
     );
-  }, [feed, filterText]);
+  }, [feedIntel, quickFilter, activeTrendingTopic, filterText]);
 
-  const handleApply = (item: RssNewsItem) => {
+  const handleApply = (item: RssNewsItem, customHook?: string) => {
     clearItemNewFlag(item);
-    onApplyNewsToSlide(item);
+    onApplyNewsToSlide(item, customHook);
     setAppliedId(item.id);
     window.setTimeout(() => {
       setAppliedId((prev) => (prev === item.id ? null : prev));
@@ -645,8 +761,45 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
     }
   };
 
+  const toggleCarouselSelection = (item: RssNewsItem) => {
+    clearItemNewFlag(item);
+    const fp = getHeadlineFingerprint(item);
+    setSelectedForCarousel((prev) => {
+      const exists = prev.some((entry) => getHeadlineFingerprint(entry) === fp);
+      if (exists) {
+        return prev.filter((entry) => getHeadlineFingerprint(entry) !== fp);
+      }
+      if (prev.length >= 7) {
+        onNotify(t.messages.slideLimitReached, 'error');
+        return prev;
+      }
+      return [...prev, item];
+    });
+  };
+
+  const handleBuildSelectedCarousel = () => {
+    if (selectedForCarousel.length < 2) {
+      onNotify(t.messages.rssCarouselNeedTwo, 'error');
+      return;
+    }
+    onBuildCarouselFromNews(selectedForCarousel.slice(0, 7));
+    setSelectedForCarousel([]);
+  };
+
   const lastUpdatedFormatted = lastUpdatedIso ? formatClockTime(lastUpdatedIso, lang) : '';
+  const updatedRelativeLabel = formatUpdatedBadge(lastUpdatedIso, nowMs, t);
+  const isJustUpdated =
+    Boolean(lastUpdatedIso) &&
+    !Number.isNaN(Date.parse(lastUpdatedIso || '')) &&
+    nowMs - Date.parse(lastUpdatedIso || '') < 20000;
   const isBusy = loading || refreshing;
+
+  const activeLicenseLabel =
+    activeVisualLicense?.type === 'wikimedia-pd-cc0'
+      ? t.news.licenseWikimedia
+      : activeVisualLicense?.type === 'user-upload'
+        ? t.news.licenseUserUpload
+        : t.news.licenseBuiltin;
 
   return (
     <div className="space-y-5">
@@ -705,6 +858,57 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
               <span>{t.news.refresh}</span>
             </button>
           </div>
+
+          {/* Clickable Local Trending Topics Bar (100% Client-Side Cross-Source Detector) */}
+          {!loading && feedIntel.trendingTopics.length > 0 && (
+            <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-zinc-800 dark:text-zinc-200">
+                  <TrendingUp className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                  <span>{t.news.trendingTopicsTitle}</span>
+                </span>
+                {selectedTopicKey && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTopicKey(null)}
+                    className="text-[11px] font-medium text-red-600 dark:text-red-400 hover:underline cursor-pointer"
+                  >
+                    {t.news.clearTopicFilter}
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {feedIntel.trendingTopics.map((topic) => {
+                  const isActive = selectedTopicKey === topic.key;
+                  return (
+                    <button
+                      key={topic.key}
+                      type="button"
+                      onClick={() =>
+                        setSelectedTopicKey((prev) => (prev === topic.key ? null : topic.key))
+                      }
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors cursor-pointer ${
+                        isActive
+                          ? 'border-red-600 bg-red-600 text-white'
+                          : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300 hover:border-red-500/60 hover:text-zinc-950 dark:hover:text-white'
+                      }`}
+                    >
+                      <span>{topic.label}</span>
+                      <span
+                        className={`text-[10px] tabular-nums px-1 py-0.2 rounded ${
+                          isActive
+                            ? 'bg-white/20 text-white'
+                            : 'bg-zinc-200/80 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                        }`}
+                      >
+                        {topic.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Live Auto-Refresh Control Bar (Off / 1 min / 2 min / 5 min + Alerts + Countdown) */}
           <div
@@ -814,12 +1018,79 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
                 )}
               </div>
 
-              {lastUpdatedFormatted && (
-                <span className="tabular-nums text-zinc-500 dark:text-zinc-400 shrink-0">
-                  {t.news.lastUpdated}:{' '}
-                  <strong className="font-mono font-medium text-zinc-700 dark:text-zinc-300">
-                    {lastUpdatedFormatted}
-                  </strong>
+              {updatedRelativeLabel && (
+                <span
+                  title={lastUpdatedFormatted ? `${t.news.lastUpdated}: ${lastUpdatedFormatted}` : undefined}
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md tabular-nums shrink-0 font-medium ${
+                    isJustUpdated
+                      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                      : 'bg-zinc-200/70 dark:bg-zinc-800/80 text-zinc-600 dark:text-zinc-300'
+                  }`}
+                >
+                  <span>{updatedRelativeLabel}</span>
+                  {lastUpdatedFormatted && (
+                    <span className="font-mono text-[10px] opacity-75">{lastUpdatedFormatted}</span>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 100% Copyright-Safe Auto-Match Visual Toggle & Active License Status */}
+          <div className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 space-y-0.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{t.news.autoMatchVisual}</span>
+                  {matchingVisual && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>{t.news.matchingVisual}</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  {t.news.autoMatchVisualHint}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoMatchSafeVisual}
+                aria-label={t.news.autoMatchVisual}
+                onClick={() => onToggleAutoMatchSafeVisual(!autoMatchSafeVisual)}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer mt-0.5 ${
+                  autoMatchSafeVisual
+                    ? 'bg-emerald-600'
+                    : 'bg-zinc-300 dark:bg-zinc-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-xs transition-transform ${
+                    autoMatchSafeVisual ? 'translate-x-4.5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-zinc-100 dark:border-zinc-800/80 text-[11px]">
+              <span
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold ${
+                  activeVisualLicense?.type === 'wikimedia-pd-cc0'
+                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                    : activeVisualLicense?.type === 'user-upload'
+                      ? 'bg-zinc-200/80 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                      : 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/25'
+                }`}
+              >
+                <ShieldCheck className="w-3 h-3 shrink-0" />
+                <span>{activeLicenseLabel}</span>
+              </span>
+              {activeVisualLicense?.licenseDetail && (
+                <span className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate max-w-[180px]">
+                  {activeVisualLicense.licenseDetail}
                 </span>
               )}
             </div>
@@ -1059,16 +1330,67 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
             </div>
 
             {feed && (
-              <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400">
+              <div className="flex items-center justify-between gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
                 <span className="truncate">
                   {t.news.liveFeedLabel}:{' '}
                   <strong className="font-medium text-zinc-700 dark:text-zinc-300">
                     {feed.feedLabel}
                   </strong>
                 </span>
-                <span className="tabular-nums shrink-0">{filteredItems.length} items</span>
+                <span className="tabular-nums shrink-0">
+                  {t.news.sortedNewestFirst} · {filteredItems.length}
+                </span>
               </div>
             )}
+
+            {/* Quick Time & Relevance Filter Strip (All Latest | Last 1 Hour | Trending | High Impact) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-1.5 pt-0.5">
+              {(
+                [
+                  { id: 'all', label: t.news.quickFilters.all, count: quickFilterCounts.all },
+                  {
+                    id: 'last-hour',
+                    label: t.news.quickFilters.lastHour,
+                    count: quickFilterCounts.lastHour,
+                  },
+                  {
+                    id: 'trending',
+                    label: t.news.quickFilters.trending,
+                    count: quickFilterCounts.trending,
+                  },
+                  {
+                    id: 'high-impact',
+                    label: t.news.quickFilters.highImpact,
+                    count: quickFilterCounts.highImpact,
+                  },
+                ] as Array<{ id: NewsQuickFilter; label: string; count: number }>
+              ).map((pill) => {
+                const active = quickFilter === pill.id;
+                return (
+                  <button
+                    key={pill.id}
+                    type="button"
+                    onClick={() => setQuickFilter(pill.id)}
+                    className={`inline-flex items-center justify-between gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors cursor-pointer ${
+                      active
+                        ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                        : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:border-zinc-400'
+                    }`}
+                  >
+                    <span className="truncate">{pill.label}</span>
+                    <span
+                      className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded ${
+                        active
+                          ? 'bg-white/20 dark:bg-black/15'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
+                      }`}
+                    >
+                      {pill.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Fallback Warning Banner */}
@@ -1089,6 +1411,50 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
               </button>
             </div>
           )}
+
+          {/* Newsroom Quick-Carousel Builder (Select 2–7 Headlines -> 1-Click Multi-Slide Carousel) */}
+          <div className="p-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/90 dark:bg-zinc-900/70 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Layers className="w-3.5 h-3.5 text-red-600 shrink-0" />
+                <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+                  {t.news.buildCarouselTitle}
+                </span>
+              </div>
+              {selectedForCarousel.length > 0 && (
+                <span className="text-[11px] font-semibold tabular-nums text-red-600 dark:text-red-400 shrink-0">
+                  {selectedForCarousel.length}/7 {t.news.selectedCount}
+                </span>
+              )}
+            </div>
+
+            {selectedForCarousel.length === 0 ? (
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                {t.news.buildCarouselHint}
+              </p>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={selectedForCarousel.length < 2}
+                  onClick={handleBuildSelectedCarousel}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                >
+                  <Layers className="w-3.5 h-3.5 shrink-0" />
+                  <span>
+                    {t.news.buildCarouselBtn} ({selectedForCarousel.length})
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedForCarousel([])}
+                  className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:border-zinc-400 transition-colors cursor-pointer shrink-0"
+                >
+                  {t.news.clearSelection}
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Headlines Feed List (Strictly Text & Source Only — Zero Scraped Images) */}
           <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
@@ -1113,22 +1479,48 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
               filteredItems.map((item) => {
                 const isApplied = appliedId === item.id;
                 const isBreakingActive = activeBreakingItemId === item.id;
-                const isNew = newFingerprints.has(getHeadlineFingerprint(item));
+                const fp = getHeadlineFingerprint(item);
+                const isNew = newFingerprints.has(fp);
+                const meta = feedIntel.metaById.get(item.id);
+                const carouselOrder = selectedForCarousel.findIndex(
+                  (entry) => getHeadlineFingerprint(entry) === fp
+                );
+                const isSelectedForCarousel = carouselOrder >= 0;
+                const isIdeasOpen = openIdeasId === item.id;
+                const hookIdeas = isIdeasOpen
+                  ? generateEthicalHookIdeas(item, meta, ideasLang)
+                  : [];
                 const timeLabel = formatRelativeTime(item.publishedAt, lang);
 
                 return (
                   <article
                     key={item.id}
                     className={`p-3.5 rounded-xl border transition-colors space-y-2.5 ${
-                      isNew
-                        ? 'border-red-400 dark:border-red-700/90 bg-red-50/40 dark:bg-red-950/20'
-                        : isBreakingActive
-                          ? 'border-red-600/70 bg-white dark:bg-zinc-900/90'
-                          : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 hover:border-zinc-400 dark:hover:border-zinc-600'
+                      isSelectedForCarousel
+                        ? 'border-red-600/80 ring-1 ring-red-600/20 bg-red-50/30 dark:bg-red-950/15'
+                        : isNew
+                          ? 'border-red-400 dark:border-red-700/90 bg-red-50/40 dark:bg-red-950/20'
+                          : isBreakingActive
+                            ? 'border-red-600/70 bg-white dark:bg-zinc-900/90'
+                            : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 hover:border-zinc-400 dark:hover:border-zinc-600'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
                       <div className="flex items-center gap-1.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => toggleCarouselSelection(item)}
+                          aria-pressed={isSelectedForCarousel}
+                          aria-label={t.news.selectForCarousel}
+                          title={t.news.selectForCarousel}
+                          className={`inline-flex items-center justify-center w-5 h-5 rounded border text-[10px] font-bold tabular-nums transition-colors shrink-0 cursor-pointer ${
+                            isSelectedForCarousel
+                              ? 'border-red-600 bg-red-600 text-white'
+                              : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-transparent hover:border-red-500'
+                          }`}
+                        >
+                          {isSelectedForCarousel ? carouselOrder + 1 : '✓'}
+                        </button>
                         {isNew && (
                           <span className="px-1.5 py-0.5 text-[10px] font-bold tracking-wide uppercase rounded bg-red-600 text-white shrink-0">
                             {t.news.newBadge}
@@ -1138,8 +1530,39 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
                           {item.source}
                         </span>
                       </div>
-                      {timeLabel && <span className="tabular-nums shrink-0">{timeLabel}</span>}
+                      {timeLabel && (
+                        <span
+                          className={`tabular-nums shrink-0 font-medium ${
+                            meta?.isWithinLastHour
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : ''
+                          }`}
+                        >
+                          {timeLabel}
+                        </span>
+                      )}
                     </div>
+
+                    {/* Local Editorial Signals (Breaking / Trending / High Impact) */}
+                    {(meta?.isBreaking || meta?.isTrending || meta?.isHighImpact) && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {meta.isBreaking && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide rounded bg-red-600/15 text-red-700 dark:text-red-300 border border-red-600/30">
+                            {t.news.badges.breaking}
+                          </span>
+                        )}
+                        {meta.isTrending && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30">
+                            🔥 {t.news.badges.trending}
+                          </span>
+                        )}
+                        {meta.isHighImpact && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-sky-500/15 text-sky-800 dark:text-sky-300 border border-sky-500/30">
+                            🚀 {t.news.badges.highImpact}
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     <h3 className="text-[13px] font-semibold leading-snug text-zinc-900 dark:text-zinc-100">
                       {item.headline}
@@ -1155,7 +1578,7 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
                       </p>
                     )}
 
-                    {/* Action Row: Standard Apply + Add Slide + One-Click Live / Breaking Toggle */}
+                    {/* Action Row: Standard Apply + Add Slide + Breaking Toggle + Ethical Hook Ideas */}
                     <div className="space-y-1.5 pt-0.5">
                       <div className="flex items-center gap-2">
                         <button
@@ -1188,26 +1611,113 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
                         )}
                       </div>
 
-                      <button
-                        type="button"
-                        aria-pressed={isBreakingActive}
-                        onClick={() => handleBreakingToggle(item)}
-                        className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
-                          isBreakingActive
-                            ? 'border-red-600 bg-red-600 text-white hover:bg-red-700'
-                            : 'border-red-200 dark:border-red-900/70 bg-red-50/70 dark:bg-red-950/30 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-950/60'
-                        }`}
-                      >
-                        <span
-                          className={`h-2 w-2 rounded-full shrink-0 ${
-                            isBreakingActive ? 'bg-white animate-pulse' : 'bg-red-600'
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          aria-pressed={isBreakingActive}
+                          onClick={() => handleBreakingToggle(item)}
+                          className={`w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                            isBreakingActive
+                              ? 'border-red-600 bg-red-600 text-white hover:bg-red-700'
+                              : 'border-red-200 dark:border-red-900/70 bg-red-50/70 dark:bg-red-950/30 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-950/60'
                           }`}
-                        />
-                        <Radio className="w-3.5 h-3.5 shrink-0" />
-                        <span>
-                          {isBreakingActive ? t.news.breakingActive : t.news.useAsBreaking}
-                        </span>
-                      </button>
+                        >
+                          <span
+                            className={`h-2 w-2 rounded-full shrink-0 ${
+                              isBreakingActive ? 'bg-white animate-pulse' : 'bg-red-600'
+                            }`}
+                          />
+                          <Radio className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">
+                            {isBreakingActive ? t.news.breakingActive : t.news.useAsBreaking}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          aria-expanded={isIdeasOpen}
+                          onClick={() =>
+                            setOpenIdeasId((prev) => (prev === item.id ? null : item.id))
+                          }
+                          className={`w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                            isIdeasOpen
+                              ? 'border-amber-500 bg-amber-500/15 text-amber-800 dark:text-amber-300'
+                              : 'border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-amber-500/70'
+                          }`}
+                        >
+                          <Lightbulb className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <span className="truncate">
+                            {isIdeasOpen ? t.news.hookIdeasHide : t.news.hookIdeasBtn}
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* Expandable Ethical Post Angle & Non-Clickbait Hook Ideas (EN / বাংলা) */}
+                      {isIdeasOpen && (
+                        <div className="mt-2 p-2.5 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+                              {t.news.hookIdeasTitle}
+                            </span>
+                            <div className="inline-flex items-center p-0.5 rounded bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setIdeasLang('en')}
+                                className={`px-1.5 py-0.5 text-[10px] font-semibold rounded cursor-pointer ${
+                                  ideasLang === 'en'
+                                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                                    : 'text-zinc-500 dark:text-zinc-400'
+                                }`}
+                              >
+                                EN
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setIdeasLang('bn')}
+                                className={`px-1.5 py-0.5 text-[10px] font-semibold rounded cursor-pointer ${
+                                  ideasLang === 'bn'
+                                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                                    : 'text-zinc-500 dark:text-zinc-400'
+                                }`}
+                              >
+                                বাংলা
+                              </button>
+                            </div>
+                          </div>
+
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                            {t.news.hookIdeasNote}
+                          </p>
+
+                          <div className="space-y-1.5">
+                            {hookIdeas.map((idea) => (
+                              <div
+                                key={idea.id}
+                                className="p-2 rounded-md border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900/90 space-y-1"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                                    {idea.angleTitle}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApply(item, idea.hook)}
+                                    className="px-2 py-0.5 text-[10px] font-semibold rounded bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950 hover:opacity-90 cursor-pointer shrink-0"
+                                  >
+                                    {t.news.applyHookBtn}
+                                  </button>
+                                </div>
+                                <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 leading-snug">
+                                  {idea.hook}
+                                </p>
+                                <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                  {idea.sourceAttribution}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </article>
                 );

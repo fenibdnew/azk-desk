@@ -199,8 +199,12 @@ export function sanitizeRssFeedResponse(raw: unknown): RssFeedResponse | null {
     const summary = sanitizePlainText(item.summary, 320);
     const source = sanitizePlainText(item.source, 90, 'News Wire');
     const category = sanitizePlainText(item.category, 50, 'News');
-    const rawPub = sanitizePlainText(item.publishedAt, 64);
-    const publishedAt = rawPub && !Number.isNaN(Date.parse(rawPub)) ? rawPub : '';
+    const rawPub = sanitizePlainText(
+      item.publishedAt || item.isoDate || item.pubDate,
+      64
+    );
+    const parsedTs = rawPub ? Date.parse(rawPub) : Number.NaN;
+    const publishedAt = !Number.isNaN(parsedTs) ? new Date(parsedTs).toISOString() : '';
 
     cleanItems.push({
       id,
@@ -212,6 +216,12 @@ export function sanitizeRssFeedResponse(raw: unknown): RssFeedResponse | null {
       publishedAt,
     });
   }
+
+  cleanItems.sort((a, b) => {
+    const tsA = a.publishedAt ? Date.parse(a.publishedAt) || 0 : 0;
+    const tsB = b.publishedAt ? Date.parse(b.publishedAt) || 0 : 0;
+    return tsB - tsA;
+  });
 
   const validCountries = new Set(['world', 'bd', 'in', 'uk', 'us', 'me', 'eu']);
   const validCategories = new Set(['top', 'world', 'tech', 'business', 'sports']);

@@ -781,7 +781,7 @@ function parseRssXmlTextOnly(
   const seenHeadlines = new Set<string>();
   const categoryLabel = CATEGORY_LABELS[category][lang];
 
-  for (let i = 0; i < itemMatches.length && items.length < 16; i++) {
+  for (let i = 0; i < itemMatches.length && items.length < 48; i++) {
     const block = itemMatches[i];
     const rawTitle = extractXmlTag(block, 'title');
     let headline = cleanRssPlainText(rawTitle).slice(0, 200);
@@ -822,8 +822,10 @@ function parseRssXmlTextOnly(
 
     const rawPubDate =
       extractXmlTag(block, 'pubDate') ||
+      extractXmlTag(block, 'isoDate') ||
       extractXmlTag(block, 'published') ||
-      extractXmlTag(block, 'updated');
+      extractXmlTag(block, 'updated') ||
+      extractXmlTag(block, 'dc:date');
     const cleanDate = cleanRssPlainText(rawPubDate);
     let publishedAt = '';
     if (cleanDate) {
@@ -846,7 +848,14 @@ function parseRssXmlTextOnly(
     });
   }
 
-  return items;
+  // Strictly sort descending by publishedAt (Newest First) so fresh headlines always appear at the top
+  items.sort((a, b) => {
+    const tsA = a.publishedAt ? Date.parse(a.publishedAt) || 0 : 0;
+    const tsB = b.publishedAt ? Date.parse(b.publishedAt) || 0 : 0;
+    return tsB - tsA;
+  });
+
+  return items.slice(0, 28);
 }
 
 function buildOfflineRssFallback(
@@ -1006,11 +1015,24 @@ async function startServer() {
     }
   });
 
-  // Safe CORS-friendly raster image proxy for clean Canvas PNG export
+  // Strict Wikimedia-only image proxy (never fetches or hotlinks news publisher images)
   app.get('/api/proxy-image', async (req, res) => {
     const rawUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
     if (!rawUrl || rawUrl.length > 2048) {
       res.status(400).json({ error: 'A valid image URL is required.' });
+      return;
+    }
+
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== 'https:' || parsed.hostname !== 'upload.wikimedia.org') {
+        res.status(403).json({
+          error: 'Only verified Wikimedia Commons Public Domain / CC0 assets are permitted.',
+        });
+        return;
+      }
+    } catch {
+      res.status(400).json({ error: 'Invalid image URL.' });
       return;
     }
 
@@ -1059,6 +1081,168 @@ async function startServer() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to fetch remote image.';
       res.status(400).json({ error: message });
+    }
+  });
+
+  // Strict Public Domain / CC0 Wikimedia Commons Safe Visual Matcher (never queries news sites)
+  const SAFE_VISUAL_CACHE = new Map<
+    string,
+    { expiresAt: number; results: Array<{ imageUrl: string; licenseName: string; title: string }> }
+  >();
+
+  const isStrictPdOrCc0 = (
+    shortName: string,
+    code: string,
+    licenseUrl: string,
+    copyrighted: string,
+    nonFree: string
+  ): boolean => {
+    if (/^(true|yes|1)$/i.test(nonFree.trim())) return false;
+    if (/\b(cc[- ]?by|gfdl|fair use|copyrighted|all rights reserved|non-free)\b/i.test(shortName)) {
+      return false;
+    }
+    const matchesShort = /^(public domain|pd\b|pd-|cc0\b|cc-zero)/i.test(shortName.trim());
+    const matchesCode = /^(pd\b|pd-|cc0\b|cc-zero)/i.test(code.trim());
+    const matchesUrl = /creativecommons\.org\/publicdomain\/(zero|mark)/i.test(licenseUrl.trim());
+    const notCopyrighted = /^false$/i.test(copyrighted.trim());
+    return matchesShort || matchesCode || matchesUrl || (notCopyrighted && /public domain|pd/i.test(shortName));
+  };
+
+  app.get('/api/media/safe-visual', async (req, res) => {
+    const rawQuery = typeof req.query.q === 'string' ? req.query.q : '';
+    const rawTopic = typeof req.query.topic === 'string' ? req.query.topic : 'world';
+    const rawExclude = typeof req.query.exclude === 'string' ? req.query.exclude : '';
+    const excludeSet = new Set(
+      rawExclude
+        .split('|')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 10)
+    );
+
+    const safeQuery = rawQuery
+      .replace(/[^a-zA-Z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100);
+    const topic = /^(breaking|politics|economy|tech|sports|world)$/.test(rawTopic)
+      ? rawTopic
+      : 'world';
+
+    if (!safeQuery) {
+      res.json({ matched: false, topic });
+      return;
+    }
+
+    const cacheKey = `${topic}:${safeQuery.toLowerCase()}`;
+    const cached = SAFE_VISUAL_CACHE.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      const picked = cached.results.find((r) => !excludeSet.has(r.imageUrl));
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(picked ? { matched: true, topic, ...picked } : { matched: false, topic });
+      return;
+    }
+
+    try {
+      const apiUrl = new URL('https://commons.wikimedia.org/w/api.php');
+      apiUrl.searchParams.set('action', 'query');
+      apiUrl.searchParams.set('format', 'json');
+      apiUrl.searchParams.set('generator', 'search');
+      apiUrl.searchParams.set('gsrnamespace', '6');
+      apiUrl.searchParams.set('gsrlimit', '12');
+      apiUrl.searchParams.set('gsrsearch', `${safeQuery} filetype:bitmap`);
+      apiUrl.searchParams.set('prop', 'imageinfo');
+      apiUrl.searchParams.set('iiprop', 'url|extmetadata|mime|size');
+      apiUrl.searchParams.set('iiurlwidth', '1280');
+
+      const upstream = await safeFetchExternal(apiUrl.toString(), {
+        timeoutMs: 3800,
+        headers: { Accept: 'application/json' },
+      });
+      if (!upstream.ok) {
+        res.json({ matched: false, topic });
+        return;
+      }
+
+      const rawText = await upstream.text();
+      if (rawText.length > 1_500_000) {
+        res.json({ matched: false, topic });
+        return;
+      }
+
+      const data = safeJsonParse(rawText) as {
+        query?: {
+          pages?: Record<string, { title?: string; imageinfo?: Array<Record<string, unknown>> }>;
+        };
+      };
+      const pages = Object.values(data?.query?.pages || {});
+      const verifiedResults: Array<{ imageUrl: string; licenseName: string; title: string }> = [];
+
+      for (const page of pages) {
+        const info = Array.isArray(page.imageinfo) ? page.imageinfo[0] : null;
+        if (!info) continue;
+        const mime = typeof info.mime === 'string' ? info.mime.toLowerCase() : '';
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) continue;
+        const width = Number(info.width || 0);
+        const height = Number(info.height || 0);
+        if (width < 600 || height < 400) continue;
+
+        const thumbUrl =
+          typeof info.thumburl === 'string'
+            ? info.thumburl
+            : typeof info.url === 'string'
+              ? info.url
+              : '';
+        let parsedThumb: URL;
+        try {
+          parsedThumb = new URL(thumbUrl);
+        } catch {
+          continue;
+        }
+        if (parsedThumb.protocol !== 'https:' || parsedThumb.hostname !== 'upload.wikimedia.org') {
+          continue;
+        }
+
+        const meta = (info.extmetadata && typeof info.extmetadata === 'object'
+          ? info.extmetadata
+          : {}) as Record<string, { value?: string }>;
+        const shortName = cleanRssPlainText(String(meta.LicenseShortName?.value || '')).slice(0, 60);
+        const licenseCode = cleanRssPlainText(String(meta.License?.value || '')).slice(0, 40);
+        const licenseUrl = typeof meta.LicenseUrl?.value === 'string' ? meta.LicenseUrl.value : '';
+        const copyrighted = cleanRssPlainText(String(meta.Copyrighted?.value || '')).slice(0, 20);
+        const nonFree = cleanRssPlainText(String(meta.NonFree?.value || '')).slice(0, 20);
+
+        if (!isStrictPdOrCc0(shortName, licenseCode, licenseUrl, copyrighted, nonFree)) {
+          continue;
+        }
+
+        const cleanTitle = cleanRssPlainText(
+          String(page.title || '')
+            .replace(/^File:/i, '')
+            .replace(/\.[^.]+$/, '')
+        ).slice(0, 80);
+
+        verifiedResults.push({
+          imageUrl: thumbUrl,
+          licenseName: shortName || 'Public Domain / CC0',
+          title: cleanTitle,
+        });
+      }
+
+      if (SAFE_VISUAL_CACHE.size > 80) {
+        SAFE_VISUAL_CACHE.clear();
+      }
+      SAFE_VISUAL_CACHE.set(cacheKey, {
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        results: verifiedResults,
+      });
+
+      const picked = verifiedResults.find((r) => !excludeSet.has(r.imageUrl));
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(picked ? { matched: true, topic, ...picked } : { matched: false, topic });
+    } catch {
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({ matched: false, topic });
     }
   });
 

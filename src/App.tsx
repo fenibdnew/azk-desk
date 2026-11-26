@@ -10,11 +10,13 @@ import {
   Grid,
   Info,
   Layers,
+  Loader2,
   Maximize2,
   Minimize2,
   Moon,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Sun,
   Trash2,
   X,
@@ -41,6 +43,8 @@ import {
   TextDirection,
   TypographySettings,
   validateAndMergeDailyConfig,
+  VisualLicenseInfo,
+  VisualLicenseType,
   WatermarkSettings,
 } from './types/studio';
 import { DEFAULT_DAILY_CONFIG, STUDIO_BACKDROPS } from './data/defaultConfig';
@@ -48,6 +52,7 @@ import { UI_STRINGS } from './data/i18n';
 import { loadCanvasImage } from './utils/imageLoader';
 import { getCanvasDimensions, renderNewsCard } from './utils/canvasRenderer';
 import { generateSocialCaption } from './utils/captionGenerator';
+import { matchCopyrightSafeVisual } from './utils/safeVisualMatcher';
 import {
   createDefaultTypography,
   loadCustomFontFromFile,
@@ -82,6 +87,7 @@ const STORAGE_KEYS = {
   brandProfiles: 'azkdesk_brand_profiles',
   customFonts: 'azkdesk_custom_fonts',
   exportScale: 'azkdesk_export_scale',
+  autoMatchSafeVisual: 'azkdesk_auto_match_safe_visual',
 };
 
 function safeReadStorage(key: string, fallback: string): string {
@@ -257,6 +263,10 @@ function createDefaultBackground(imageUrl = STUDIO_BACKDROPS[0].url): Background
       patternOpacity: 40,
       patternScale: 48,
     },
+    visualLicense: {
+      type: 'editorial-builtin',
+      label: 'Built-in Editorial Backdrop',
+    },
   };
 }
 
@@ -373,6 +383,30 @@ function sanitizeImportedBackground(
             : fallback.procedural.patternScale,
       };
     })(),
+    visualLicense: (() => {
+      const rawLic = b.visualLicense;
+      if (!rawLic || typeof rawLic !== 'object') return fallback.visualLicense;
+      const lic = rawLic as Record<string, unknown>;
+      const validTypes: VisualLicenseType[] = [
+        'editorial-builtin',
+        'wikimedia-pd-cc0',
+        'user-upload',
+      ];
+      const safeType: VisualLicenseType = validTypes.includes(lic.type as VisualLicenseType)
+        ? (lic.type as VisualLicenseType)
+        : 'editorial-builtin';
+      const cleaned: VisualLicenseInfo = {
+        type: safeType,
+        label: sanitizePlainText(lic.label, 80, 'Built-in Editorial Backdrop'),
+      };
+      const detail = sanitizePlainText(lic.licenseDetail, 80);
+      const attribution = sanitizePlainText(lic.attribution, 120);
+      const topic = sanitizePlainText(lic.topic, 40);
+      if (detail) cleaned.licenseDetail = detail;
+      if (attribution) cleaned.attribution = attribution;
+      if (topic) cleaned.topic = topic;
+      return cleaned;
+    })(),
   };
 }
 
@@ -471,8 +505,14 @@ export default function App() {
   const [exportProgress, setExportProgress] = useState<string | null>(null);
   const [rssNewCount, setRssNewCount] = useState(0);
   const [breakingItemBySlide, setBreakingItemBySlide] = useState<Record<string, string>>({});
+  const [autoMatchSafeVisual, setAutoMatchSafeVisual] = useState<boolean>(() => {
+    return safeReadStorage(STORAGE_KEYS.autoMatchSafeVisual, 'true') !== 'false';
+  });
+  const [matchingVisualCount, setMatchingVisualCount] = useState(0);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const matchingVisual = matchingVisualCount > 0;
 
   // Toast feedback
   const [toast, setToast] = useState<{ text: string; tone: 'info' | 'error' } | null>(null);
@@ -921,17 +961,82 @@ export default function App() {
             zoom: 1,
             panX: 0,
             panY: 0,
+            visualLicense: {
+              type: 'editorial-builtin',
+              label: t.news.licenseBuiltin,
+              licenseDetail: lang === 'bn' ? foundBackdrop.titleBn : foundBackdrop.title,
+            },
           }
         : prev.background,
     }));
   };
 
-  // Populate active slide with RSS text & source metadata ONLY (never pulls third-party photos)
-  const handleApplyRssToActiveSlide = (item: RssNewsItem) => {
+  // Resolve & apply a 100% copyright-safe visual (Wikimedia PD/CC0 or built-in editorial backdrop)
+  const applySafeVisualToSlideById = useCallback(
+    async (
+      slideId: string,
+      item: RssNewsItem,
+      options: {
+        preserveThemeId?: string;
+        excludeUrls?: Set<string>;
+        silent?: boolean;
+      } = {}
+    ) => {
+      setMatchingVisualCount((c) => c + 1);
+      try {
+        const matched = await matchCopyrightSafeVisual(item, lang, options.excludeUrls);
+        if (matched.backgroundPatch.mode === 'photo' && matched.backgroundPatch.imageUrl) {
+          options.excludeUrls?.add(matched.backgroundPatch.imageUrl);
+        }
+        const resolvedThemeId = options.preserveThemeId
+          ? options.preserveThemeId
+          : config.themes.some((th) => th.id === matched.themeId)
+            ? matched.themeId
+            : undefined;
+
+        setSlides((prev) =>
+          prev.map((sl) => {
+            if (sl.id !== slideId) return sl;
+            return {
+              ...sl,
+              themeId: resolvedThemeId || sl.themeId,
+              content: {
+                ...sl.content,
+                credit: lang === 'bn' ? matched.creditBn : matched.creditEn,
+              },
+              background: {
+                ...sl.background,
+                ...matched.backgroundPatch,
+                procedural: matched.backgroundPatch.procedural
+                  ? { ...matched.backgroundPatch.procedural }
+                  : { ...sl.background.procedural },
+                visualLicense: matched.license,
+              },
+            };
+          })
+        );
+
+        if (!options.silent) {
+          notify(
+            matched.license.type === 'wikimedia-pd-cc0'
+              ? t.messages.safeVisualWikimedia
+              : t.messages.safeVisualEditorial
+          );
+        }
+      } finally {
+        setMatchingVisualCount((c) => Math.max(0, c - 1));
+      }
+    },
+    [config.themes, lang, notify, t.messages.safeVisualEditorial, t.messages.safeVisualWikimedia]
+  );
+
+  // Populate active slide with RSS text & source metadata ONLY (never pulls third-party news photos)
+  const handleApplyRssToActiveSlide = (item: RssNewsItem, customHook?: string) => {
+    const targetSlideId = activeSlide.id;
     setBreakingItemBySlide((prev) => {
-      if (!prev[activeSlide.id]) return prev;
+      if (!prev[targetSlideId]) return prev;
       const next = { ...prev };
-      delete next[activeSlide.id];
+      delete next[targetSlideId];
       return next;
     });
     updateActiveSlide((prev) => ({
@@ -939,13 +1044,16 @@ export default function App() {
       content: {
         ...prev.content,
         category: item.category || prev.content.category,
-        hook: item.hook,
+        hook: customHook?.trim() || item.hook,
         headline: item.headline,
         body: item.summary && item.summary !== item.hook ? item.summary : '',
         source: item.source,
       },
     }));
     notify(t.messages.rssApplied);
+    if (autoMatchSafeVisual) {
+      void applySafeVisualToSlideById(targetSlideId, item);
+    }
   };
 
   // One-click "Use as Live / Breaking" toggle on fetched RSS items
@@ -990,6 +1098,12 @@ export default function App() {
       }));
       setBreakingItemBySlide((prev) => ({ ...prev, [slideId]: item.id }));
       notify(t.messages.rssBreakingApplied);
+      if (autoMatchSafeVisual) {
+        void applySafeVisualToSlideById(slideId, item, {
+          preserveThemeId: breakingThemeId,
+          silent: true,
+        });
+      }
     } else {
       updateActiveSlide((prev) => ({
         ...prev,
@@ -1020,8 +1134,9 @@ export default function App() {
       return;
     }
     const nextNum = slides.length + 1;
+    const newSlideId = `slide-rss-${Date.now()}-${nextNum}`;
     const newSlide: SlideData = {
-      id: `slide-rss-${Date.now()}-${nextNum}`,
+      id: newSlideId,
       layoutId: activeSlide.layoutId,
       themeId: activeSlide.themeId,
       content: {
@@ -1043,6 +1158,60 @@ export default function App() {
     setSlides((prev) => [...prev, newSlide]);
     setActiveSlideIndex(slides.length);
     notify(t.messages.rssAddedSlide);
+    if (autoMatchSafeVisual) {
+      void applySafeVisualToSlideById(newSlideId, item);
+    }
+  };
+
+  // Build a 2–7 slide newsroom carousel in one click from checked RSS headlines
+  const handleBuildCarouselFromNews = (items: RssNewsItem[]) => {
+    const selected = items.slice(0, MAX_SLIDES);
+    if (selected.length < 2) {
+      notify(t.messages.rssCarouselNeedTwo, 'error');
+      return;
+    }
+
+    const baseTime = Date.now();
+    const builtSlides: SlideData[] = selected.map((item, idx) => ({
+      id: `slide-carousel-${baseTime}-${idx + 1}`,
+      layoutId: activeSlide.layoutId,
+      themeId: activeSlide.themeId,
+      content: {
+        ...activeSlide.content,
+        typography: cloneTypography(activeSlide.content.typography),
+        category: item.category || activeSlide.content.category,
+        hook: item.hook,
+        headline: item.headline,
+        body: item.summary && item.summary !== item.hook ? item.summary : '',
+        source: item.source,
+        warning: '',
+        showWarning: false,
+      },
+      background: {
+        ...activeSlide.background,
+        procedural: { ...activeSlide.background.procedural },
+        visualLicense: activeSlide.background.visualLicense
+          ? { ...activeSlide.background.visualLicense }
+          : { type: 'editorial-builtin', label: t.news.licenseBuiltin },
+      },
+    }));
+
+    setSlides(builtSlides);
+    setActiveSlideIndex(0);
+    setBreakingItemBySlide({});
+    notify(`${builtSlides.length} · ${t.messages.rssCarouselBuilt}`);
+
+    if (autoMatchSafeVisual) {
+      const usedUrls = new Set<string>();
+      void (async () => {
+        for (let i = 0; i < builtSlides.length; i++) {
+          await applySafeVisualToSlideById(builtSlides[i].id, selected[i], {
+            excludeUrls: usedUrls,
+            silent: true,
+          });
+        }
+      })();
+    }
   };
 
   // Populate active slide from pasted raw news text (deterministic client-side parser)
@@ -1657,8 +1826,16 @@ export default function App() {
                 canAddSlide={slides.length < MAX_SLIDES}
                 activeBreakingItemId={breakingItemBySlide[activeSlide.id] ?? null}
                 onApplyNewsToSlide={handleApplyRssToActiveSlide}
+                autoMatchSafeVisual={autoMatchSafeVisual}
+                onToggleAutoMatchSafeVisual={(enabled) => {
+                  setAutoMatchSafeVisual(enabled);
+                  safeWriteStorage(STORAGE_KEYS.autoMatchSafeVisual, String(enabled));
+                }}
+                matchingVisual={matchingVisual}
+                activeVisualLicense={activeSlide.background.visualLicense}
                 onToggleBreakingNewsOnSlide={handleToggleBreakingNewsOnSlide}
                 onAddNewsAsSlide={handleAddRssAsSlide}
+                onBuildCarouselFromNews={handleBuildCarouselFromNews}
                 onApplyRawNewsToSlide={handleApplyRawNewsToActiveSlide}
                 onAddRawNewsAsSlide={handleAddRawNewsAsSlide}
                 onNewHeadlinesCountChange={setRssNewCount}
@@ -2124,9 +2301,42 @@ export default function App() {
               </div>
             </div>
 
-            {/* Quiet Unboxed Technical Metadata Footer */}
+            {/* Quiet Unboxed Technical Metadata Footer + Active Visual License Badge */}
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400 tabular-nums">
               <div className="flex flex-wrap items-center gap-2">
+                <span
+                  title={
+                    [
+                      activeSlide.background.visualLicense?.licenseDetail,
+                      activeSlide.background.visualLicense?.attribution,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || undefined
+                  }
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold text-[11px] ${
+                    activeSlide.background.visualLicense?.type === 'wikimedia-pd-cc0'
+                      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30'
+                      : activeSlide.background.visualLicense?.type === 'user-upload'
+                        ? 'bg-zinc-200/80 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                        : 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/25'
+                  }`}
+                >
+                  {matchingVisual ? (
+                    <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+                  ) : (
+                    <ShieldCheck className="w-3 h-3 shrink-0" />
+                  )}
+                  <span>
+                    {matchingVisual
+                      ? t.news.matchingVisual
+                      : activeSlide.background.visualLicense?.type === 'wikimedia-pd-cc0'
+                        ? t.news.licenseWikimedia
+                        : activeSlide.background.visualLicense?.type === 'user-upload'
+                          ? t.news.licenseUserUpload
+                          : t.news.licenseBuiltin}
+                  </span>
+                </span>
+                <span aria-hidden="true">·</span>
                 <span>
                   {dims.width} × {dims.height} px
                   {exportScale > 1

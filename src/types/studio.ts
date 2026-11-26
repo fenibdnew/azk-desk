@@ -29,6 +29,18 @@ export type ProceduralPattern = 'gradient' | 'grid' | 'dots' | 'stripes' | 'radi
 
 export type ScrimStyle = 'bottom' | 'full' | 'dual' | 'vignette' | 'angled';
 
+export type VisualLicenseType = 'editorial-builtin' | 'wikimedia-pd-cc0' | 'user-upload';
+
+export interface VisualLicenseInfo {
+  type: VisualLicenseType;
+  label: string;
+  licenseDetail?: string;
+  attribution?: string;
+  topic?: string;
+}
+
+export type NewsVisualTopic = 'breaking' | 'politics' | 'economy' | 'tech' | 'sports' | 'world';
+
 export interface LayerTypography {
   fontFamily: string;
   fontWeight: FontWeightValue;
@@ -191,6 +203,7 @@ export interface BackgroundSettings {
     patternOpacity: number;
     patternScale: number;
   };
+  visualLicense?: VisualLicenseInfo;
 }
 
 export interface SlideData {

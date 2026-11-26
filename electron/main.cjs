@@ -301,17 +301,22 @@ function extractXmlTag(block, tagName) {
 
 function parseRssXmlTextOnly(xml, fallbackSource, categoryLabel, prefix) {
   const items = [];
+  const seen = new Set();
   const matches = xml.match(/<(item|entry)\b[\s\S]*?<\/\1>/gi) || [];
-  for (let i = 0; i < Math.min(matches.length, 24); i++) {
+  for (let i = 0; i < Math.min(matches.length, 48); i++) {
     const raw = matches[i];
     let headline = extractXmlTag(raw, 'title');
-    if (!headline) continue;
-    let source = extractXmlTag(raw, 'source') || fallbackSource;
+    if (!headline || headline.length < 8) continue;
+    let source = extractXmlTag(raw, 'source') || extractXmlTag(raw, 'dc:creator') || fallbackSource;
     const dashSplit = headline.match(/^(.{18,})\s+-\s+([^-]{2,42})$/);
     if (dashSplit) {
       headline = dashSplit[1].trim();
       if (!extractXmlTag(raw, 'source')) source = dashSplit[2].trim();
     }
+    const dedupeKey = headline.toLowerCase();
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+
     const rawDesc = extractXmlTag(raw, 'description') || extractXmlTag(raw, 'summary');
     const summary = rawDesc.length > 180 ? `${rawDesc.slice(0, 177).trim()}...` : rawDesc;
     const hook = summary
@@ -319,11 +324,20 @@ function parseRssXmlTextOnly(xml, fallbackSource, categoryLabel, prefix) {
         ? `${summary.slice(0, 85).trim()}...`
         : summary
       : `${categoryLabel} · ${source}`;
-    const publishedAt =
+    const rawDate =
       extractXmlTag(raw, 'pubDate') ||
-      extractXmlTag(raw, 'updated') ||
+      extractXmlTag(raw, 'isoDate') ||
       extractXmlTag(raw, 'published') ||
+      extractXmlTag(raw, 'updated') ||
+      extractXmlTag(raw, 'dc:date') ||
       '';
+    let publishedAt = '';
+    if (rawDate) {
+      const parsedTs = Date.parse(rawDate);
+      if (!Number.isNaN(parsedTs)) {
+        publishedAt = new Date(parsedTs).toISOString();
+      }
+    }
     items.push({
       id: `${prefix}-${i}`,
       headline,
@@ -334,7 +348,15 @@ function parseRssXmlTextOnly(xml, fallbackSource, categoryLabel, prefix) {
       publishedAt,
     });
   }
-  return items;
+
+  // Strictly sort descending by publishedAt (Newest First)
+  items.sort((a, b) => {
+    const tsA = a.publishedAt ? Date.parse(a.publishedAt) || 0 : 0;
+    const tsB = b.publishedAt ? Date.parse(b.publishedAt) || 0 : 0;
+    return tsB - tsA;
+  });
+
+  return items.slice(0, 28);
 }
 
 function jsonResponse(data, status = 200) {
@@ -456,6 +478,130 @@ async function handleAppProtocolRequest(request) {
       fallback: true,
       items: [],
     });
+  }
+
+  // 3b. Strict Wikimedia Commons Public Domain / CC0 Visual Matcher (never queries news publishers)
+  if (pathname === '/api/media/safe-visual') {
+    const rawQuery = url.searchParams.get('q') || '';
+    const rawTopic = url.searchParams.get('topic') || 'world';
+    const rawExclude = url.searchParams.get('exclude') || '';
+    const excludeSet = new Set(
+      rawExclude
+        .split('|')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 10)
+    );
+    const safeQuery = rawQuery
+      .replace(/[^a-zA-Z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 100);
+    const topic = /^(breaking|politics|economy|tech|sports|world)$/.test(rawTopic)
+      ? rawTopic
+      : 'world';
+
+    if (!safeQuery) return jsonResponse({ matched: false, topic });
+
+    try {
+      const apiUrl = new URL('https://commons.wikimedia.org/w/api.php');
+      apiUrl.searchParams.set('action', 'query');
+      apiUrl.searchParams.set('format', 'json');
+      apiUrl.searchParams.set('generator', 'search');
+      apiUrl.searchParams.set('gsrnamespace', '6');
+      apiUrl.searchParams.set('gsrlimit', '12');
+      apiUrl.searchParams.set('gsrsearch', `${safeQuery} filetype:bitmap`);
+      apiUrl.searchParams.set('prop', 'imageinfo');
+      apiUrl.searchParams.set('iiprop', 'url|extmetadata|mime|size');
+      apiUrl.searchParams.set('iiurlwidth', '1280');
+
+      const res = await safeExternalFetch(apiUrl.toString(), 'application/json');
+      if (!res.ok) return jsonResponse({ matched: false, topic });
+      const text = await res.text();
+      if (text.length > 1_500_000) return jsonResponse({ matched: false, topic });
+
+      const data = safeJsonParse(text);
+      const pages = Object.values((data && data.query && data.query.pages) || {});
+      for (const page of pages) {
+        const info = Array.isArray(page.imageinfo) ? page.imageinfo[0] : null;
+        if (!info) continue;
+        const mime = typeof info.mime === 'string' ? info.mime.toLowerCase() : '';
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(mime)) continue;
+        if (Number(info.width || 0) < 600 || Number(info.height || 0) < 400) continue;
+
+        const thumbUrl = typeof info.thumburl === 'string' ? info.thumburl : typeof info.url === 'string' ? info.url : '';
+        let parsedThumb;
+        try {
+          parsedThumb = new URL(thumbUrl);
+        } catch {
+          continue;
+        }
+        if (parsedThumb.protocol !== 'https:' || parsedThumb.hostname !== 'upload.wikimedia.org') continue;
+        if (excludeSet.has(thumbUrl)) continue;
+
+        const meta = info.extmetadata && typeof info.extmetadata === 'object' ? info.extmetadata : {};
+        const shortName = cleanRssPlainText(meta.LicenseShortName && meta.LicenseShortName.value).slice(0, 60);
+        const licenseCode = cleanRssPlainText(meta.License && meta.License.value).slice(0, 40);
+        const licenseUrl = String((meta.LicenseUrl && meta.LicenseUrl.value) || '');
+        const copyrighted = cleanRssPlainText(meta.Copyrighted && meta.Copyrighted.value).slice(0, 20);
+        const nonFree = cleanRssPlainText(meta.NonFree && meta.NonFree.value).slice(0, 20);
+
+        if (/^(true|yes|1)$/i.test(nonFree)) continue;
+        if (/\b(cc[- ]?by|gfdl|fair use|copyrighted|all rights reserved|non-free)\b/i.test(shortName)) continue;
+        const okLicense =
+          /^(public domain|pd\b|pd-|cc0\b|cc-zero)/i.test(shortName) ||
+          /^(pd\b|pd-|cc0\b|cc-zero)/i.test(licenseCode) ||
+          /creativecommons\.org\/publicdomain\/(zero|mark)/i.test(licenseUrl) ||
+          (/^false$/i.test(copyrighted) && /public domain|pd/i.test(shortName));
+        if (!okLicense) continue;
+
+        const cleanTitle = cleanRssPlainText(
+          String(page.title || '').replace(/^File:/i, '').replace(/\.[^.]+$/, '')
+        ).slice(0, 80);
+
+        return jsonResponse({
+          matched: true,
+          topic,
+          imageUrl: thumbUrl,
+          licenseName: shortName || 'Public Domain / CC0',
+          title: cleanTitle,
+        });
+      }
+      return jsonResponse({ matched: false, topic });
+    } catch {
+      return jsonResponse({ matched: false, topic });
+    }
+  }
+
+  // 3c. Strict Wikimedia-only image proxy for taint-free desktop Canvas PNG export
+  if (pathname === '/api/proxy-image') {
+    const rawUrl = (url.searchParams.get('url') || '').trim();
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol !== 'https:' || parsed.hostname !== 'upload.wikimedia.org') {
+        return jsonResponse({ error: 'Only verified Wikimedia Commons images are proxied.' }, 403);
+      }
+      const res = await safeExternalFetch(parsed.toString(), 'image/webp,image/png,image/jpeg,*/*;q=0.8');
+      if (!res.ok) return new Response('Upstream error', { status: 502, headers: SECURITY_HEADERS });
+      const contentType = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(contentType)) {
+        return new Response('Unsupported media type', { status: 415, headers: SECURITY_HEADERS });
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.byteLength > 10 * 1024 * 1024) {
+        return new Response('Image too large', { status: 413, headers: SECURITY_HEADERS });
+      }
+      return new Response(buf, {
+        status: 200,
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=3600',
+          ...SECURITY_HEADERS,
+        },
+      });
+    } catch {
+      return jsonResponse({ error: 'Unable to load image.' }, 400);
+    }
   }
 
   // 4. Static file resolution inside dist/ (with strict trailing path.sep traversal guard)

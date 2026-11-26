@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { ImagePlus, RotateCcw, Shuffle, Upload } from 'lucide-react';
+import { ImagePlus, RotateCcw, ShieldCheck, Shuffle, Upload } from 'lucide-react';
 import { BackgroundSettings, Language, ProceduralPattern } from '../types/studio';
 import { STUDIO_BACKDROPS } from '../data/defaultConfig';
 import { UIStrings } from '../data/i18n';
@@ -50,6 +50,10 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
           zoom: 1,
           panX: 0,
           panY: 0,
+          visualLicense: {
+            type: 'user-upload',
+            label: t.news.licenseUserUpload,
+          },
         });
         onNotify(t.messages.imageLoaded);
       }
@@ -57,11 +61,16 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const builtinLicense = {
+    type: 'editorial-builtin' as const,
+    label: t.news.licenseBuiltin,
+  };
+
   const randomizeProcedural = () => {
     const pair = PROCEDURAL_PALETTES[Math.floor(Math.random() * PROCEDURAL_PALETTES.length)];
     const pattern = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
     const angle = Math.floor(Math.random() * 12) * 30;
-    onChangeBackground({ mode: 'procedural' });
+    onChangeBackground({ mode: 'procedural', visualLicense: builtinLicense });
     onChangeProcedural({
       colorA: pair[0],
       colorB: pair[1],
@@ -73,8 +82,37 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
   const isCustomUploadedPhoto =
     background.mode === 'photo' && background.imageUrl.startsWith('data:image/');
 
+  const activeLicense = background.visualLicense;
+  const activeLicenseLabel =
+    activeLicense?.type === 'wikimedia-pd-cc0'
+      ? t.news.licenseWikimedia
+      : activeLicense?.type === 'user-upload' || isCustomUploadedPhoto
+        ? t.news.licenseUserUpload
+        : t.news.licenseBuiltin;
+
   return (
     <div className="space-y-5">
+      {/* Active Slide Copyright / License Verification Badge */}
+      <div
+        className={`flex items-start gap-2.5 p-3 rounded-xl border text-xs ${
+          activeLicense?.type === 'wikimedia-pd-cc0'
+            ? 'border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200'
+            : activeLicense?.type === 'user-upload' || isCustomUploadedPhoto
+              ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 text-zinc-800 dark:text-zinc-200'
+              : 'border-sky-200 dark:border-sky-900/60 bg-sky-50/60 dark:bg-sky-950/25 text-sky-900 dark:text-sky-200'
+        }`}
+      >
+        <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+        <div className="min-w-0 space-y-0.5">
+          <div className="font-semibold leading-tight">{activeLicenseLabel}</div>
+          {(activeLicense?.attribution || activeLicense?.licenseDetail) && (
+            <div className="text-[11px] opacity-80 truncate">
+              {[activeLicense.licenseDetail, activeLicense.attribution].filter(Boolean).join(' · ')}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Primary Direct Device Photo Upload (No External URL Input or Stock API Keys) */}
       <div className="space-y-2.5">
         <span className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
@@ -123,7 +161,9 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => onChangeBackground({ mode: 'procedural' })}
+                onClick={() =>
+                  onChangeBackground({ mode: 'procedural', visualLicense: builtinLicense })
+                }
                 className="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-zinc-400 whitespace-nowrap"
               >
                 {t.media.removePhoto}
@@ -425,7 +465,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
 
         <button
           type="button"
-          onClick={() => onChangeBackground({ mode: 'procedural' })}
+          onClick={() => onChangeBackground({ mode: 'procedural', visualLicense: builtinLicense })}
           className={`w-full py-2 px-3 text-xs font-semibold rounded-lg border transition-colors ${
             background.mode === 'procedural'
               ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
@@ -441,7 +481,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
               key={pat}
               type="button"
               onClick={() => {
-                onChangeBackground({ mode: 'procedural' });
+                onChangeBackground({ mode: 'procedural', visualLicense: builtinLicense });
                 onChangeProcedural({ pattern: pat });
               }}
               className={`px-2 py-1.5 text-xs font-medium rounded-md border transition-colors truncate ${
@@ -462,7 +502,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
               type="color"
               value={background.procedural.colorA}
               onChange={(e) => {
-                onChangeBackground({ mode: 'procedural' });
+                onChangeBackground({ mode: 'procedural', visualLicense: builtinLicense });
                 onChangeProcedural({ colorA: e.target.value });
               }}
               className="w-7 h-6 rounded border-0 bg-transparent cursor-pointer"
@@ -475,7 +515,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
               type="color"
               value={background.procedural.colorB}
               onChange={(e) => {
-                onChangeBackground({ mode: 'procedural' });
+                onChangeBackground({ mode: 'procedural', visualLicense: builtinLicense });
                 onChangeProcedural({ colorB: e.target.value });
               }}
               className="w-7 h-6 rounded border-0 bg-transparent cursor-pointer"
@@ -499,7 +539,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
               max={360}
               value={background.procedural.angle}
               onChange={(e) => {
-                onChangeBackground({ mode: 'procedural' });
+                onChangeBackground({ mode: 'procedural', visualLicense: builtinLicense });
                 onChangeProcedural({ angle: Number(e.target.value) });
               }}
               className="w-full"
@@ -521,7 +561,7 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
               max={100}
               value={background.procedural.patternOpacity}
               onChange={(e) => {
-                onChangeBackground({ mode: 'procedural' });
+                onChangeBackground({ mode: 'procedural', visualLicense: builtinLicense });
                 onChangeProcedural({ patternOpacity: Number(e.target.value) });
               }}
               className="w-full"
@@ -549,6 +589,11 @@ export const MediaPanel: React.FC<MediaPanelProps> = ({
                     zoom: 1,
                     panX: 0,
                     panY: 0,
+                    visualLicense: {
+                      type: 'editorial-builtin',
+                      label: t.news.licenseBuiltin,
+                      licenseDetail: lang === 'bn' ? item.titleBn : item.title,
+                    },
                   });
                   onAutoCredit(lang === 'bn' ? item.creditBn : item.creditEn);
                 }}
