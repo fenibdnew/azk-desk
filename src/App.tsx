@@ -22,10 +22,13 @@ import {
   Minimize2,
   Moon,
   Plus,
+  Redo2,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   Sun,
   Trash2,
+  Undo2,
   X,
 } from 'lucide-react';
 import {
@@ -62,7 +65,12 @@ import { getCanvasDimensions, renderNewsCard } from './utils/canvasRenderer';
 import { generateSocialCaption } from './utils/captionGenerator';
 import { analyzePostClarity } from './utils/postClarityAnalyzer';
 import { matchCopyrightSafeVisual } from './utils/safeVisualMatcher';
-import { canvasToPngBytes, createZipBlob, triggerBlobDownload } from './utils/zipBuilder';
+import {
+  canvasToPngBytes,
+  copyCanvasToClipboard,
+  createZipBlob,
+  triggerBlobDownload,
+} from './utils/zipBuilder';
 import {
   createDefaultTypography,
   loadCustomFontFromFile,
@@ -83,6 +91,10 @@ import { SyncConfigPanel } from './components/SyncConfigPanel';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { AboutCreatorModal } from './components/AboutCreatorModal';
+import { ContrastWarningBadge } from './components/ContrastWarningBadge';
+import { QuickStartModal } from './components/QuickStartModal';
+import { evaluateCardContrast } from './utils/contrastChecker';
+import { useSlideHistory } from './hooks/useSlideHistory';
 
 type WorkspaceTab = 'content' | 'news' | 'brand' | 'media' | 'sync';
 
@@ -763,6 +775,8 @@ export default function App() {
   const [fontsLoadedTick, setFontsLoadedTick] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<string | null>(null);
+  const [copyingImage, setCopyingImage] = useState(false);
+  const [copiedImageFlash, setCopiedImageFlash] = useState(false);
   const [rssNewCount, setRssNewCount] = useState(0);
   const [breakingItemBySlide, setBreakingItemBySlide] = useState<Record<string, string>>({});
   const [autoMatchSafeVisual, setAutoMatchSafeVisual] = useState<boolean>(() => {
@@ -770,6 +784,7 @@ export default function App() {
   });
   const [matchingVisualCount, setMatchingVisualCount] = useState(0);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [quickStartOpen, setQuickStartOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const matchingVisual = matchingVisualCount > 0;
@@ -832,6 +847,17 @@ export default function App() {
     },
     [safeActiveIndex]
   );
+
+  const handleRestoreHistory = useCallback((restoredSlides: SlideData[], restoredIdx: number) => {
+    setSlides(restoredSlides);
+    setActiveSlideIndex(Math.max(0, Math.min(restoredIdx, restoredSlides.length - 1)));
+  }, []);
+
+  const { canUndo, canRedo, undo, redo } = useSlideHistory({
+    slides,
+    activeSlideIndex: safeActiveIndex,
+    onRestore: handleRestoreHistory,
+  });
 
   // Sync Tailwind dark class on <html>
   useEffect(() => {
@@ -1010,6 +1036,29 @@ export default function App() {
   const activeTheme = useMemo(() => {
     return config.themes.find((item) => item.id === activeSlide.themeId) || config.themes[0];
   }, [config.themes, activeSlide.themeId]);
+
+  const contrastCheck = useMemo(
+    () => evaluateCardContrast(activeSlide, activeTheme),
+    [activeSlide, activeTheme]
+  );
+
+  const handleFixContrast = useCallback(() => {
+    const fix = contrastCheck.recommendedFix;
+    updateActiveSlide((prev) => ({
+      ...prev,
+      themeId: fix.themeId ?? prev.themeId,
+      background: fix.backgroundPatch
+        ? {
+            ...prev.background,
+            ...fix.backgroundPatch,
+            procedural: fix.backgroundPatch.procedural
+              ? { ...prev.background.procedural, ...fix.backgroundPatch.procedural }
+              : prev.background.procedural,
+          }
+        : prev.background,
+    }));
+    notify(t.messages.contrastFixed);
+  }, [contrastCheck.recommendedFix, updateActiveSlide, notify, t.messages.contrastFixed]);
 
   const activeLayoutMeta = useMemo(() => {
     return (
@@ -1283,6 +1332,39 @@ export default function App() {
           }
         : prev.background,
     }));
+  };
+
+  // 1-click Global Breaking Card starter preset (used in Quick Start modal)
+  const handleApplyBreakingStarter = () => {
+    const nowTime = new Date().toLocaleTimeString(lang === 'bn' ? 'bn-BD' : 'en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    updateActiveSlide((prev) => ({
+      ...prev,
+      layoutId: 'breaking',
+      themeId: 'crimson-press',
+      content: {
+        ...prev.content,
+        category: lang === 'bn' ? 'ব্রেকিং নিউজ' : 'BREAKING NEWS',
+        hook: lang === 'bn' ? `লাইভ আপডেট · ${nowTime}` : `LIVE UPDATE · ${nowTime}`,
+        headline:
+          lang === 'bn'
+            ? 'বিশ্ব বাজারে জ্বালানি ও প্রযুক্তি খাতে গুরুত্বপূর্ণ অগ্রগতি ঘোষণা'
+            : 'Global Energy & Tech Summit Announces New Cross-Border Infrastructure Pact',
+        body:
+          lang === 'bn'
+            ? 'সংশ্লিষ্ট সংস্থাগুলোর যৌথ বিবৃতিতে পরবর্তী ধাপের সময়সূচি প্রকাশ করা হয়েছে।'
+            : 'Joint officials confirmed phased milestones beginning next quarter across major regional hubs.',
+        source: lang === 'bn' ? 'এজেডকে ডেস্ক · গ্লোবাল ওয়্যার' : 'AZK Desk · Global Wire',
+        showDateBadge: true,
+      },
+      background: {
+        ...prev.background,
+        scrimOpacity: Math.max(prev.background.scrimOpacity, 74),
+      },
+    }));
+    notify(t.messages.breakingPresetApplied);
   };
 
   // 1-click Quote Card preset with oversized quote mark, serif styling, and speaker fields
@@ -2002,7 +2084,47 @@ export default function App() {
     }
   };
 
-  // Global keyboard shortcuts: Ctrl/Cmd+S (save), Ctrl/Cmd+E (export PNG), Ctrl/Cmd+Left/Right (slide switch)
+  // 1-click Copy rendered HD PNG directly to system clipboard
+  const handleCopyActivePng = async () => {
+    if (copyingImage || exporting) return;
+    setCopyingImage(true);
+    const offscreen = document.createElement('canvas');
+    try {
+      renderNewsCard({
+        canvas: offscreen,
+        aspectRatio,
+        scale: exportScale,
+        layoutId: activeSlide.layoutId,
+        theme: activeTheme,
+        content: activeSlide.content,
+        brand,
+        watermark,
+        background: activeSlide.background,
+        bgImage: bgImgEl,
+        logoImage: logoImgEl,
+        watermarkLogoImage: wmLogoImgEl,
+        slideIndex: safeActiveIndex,
+        totalSlides: slides.length,
+        lang,
+      });
+      const ok = await copyCanvasToClipboard(offscreen);
+      if (ok) {
+        setCopiedImageFlash(true);
+        window.setTimeout(() => setCopiedImageFlash(false), 2000);
+        notify(t.messages.copyImageSuccess);
+      } else {
+        notify(t.messages.copyImageError, 'error');
+      }
+    } catch {
+      notify(t.messages.copyImageError, 'error');
+    } finally {
+      offscreen.width = 0;
+      offscreen.height = 0;
+      setCopyingImage(false);
+    }
+  };
+
+  // Global keyboard shortcuts: Ctrl/Cmd+S (save), Ctrl/Cmd+E (export PNG), Ctrl/Cmd+Z/Y (undo/redo), Ctrl/Cmd+Left/Right (slides)
   const shortcutExportRef = useRef(handleDownloadActivePng);
   shortcutExportRef.current = handleDownloadActivePng;
   useEffect(() => {
@@ -2028,6 +2150,18 @@ export default function App() {
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT' ||
           target.isContentEditable);
+
+      if (!isEditingField) {
+        if (key === 'z' && !e.shiftKey) {
+          if (undo()) e.preventDefault();
+          return;
+        }
+        if (key === 'y' || (key === 'z' && e.shiftKey)) {
+          if (redo()) e.preventDefault();
+          return;
+        }
+      }
+
       if (isEditingField || slides.length <= 1) return;
 
       if (e.key === 'ArrowLeft') {
@@ -2040,7 +2174,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [saveDraftNow, notify, t.messages.draftSavedManual, slides.length]);
+  }, [saveDraftNow, notify, t.messages.draftSavedManual, slides.length, undo, redo]);
 
   // Sequential high-res PNG export for all 1..7 slides without UI clipping or memory leaks
   const handleExportAllSlides = async () => {
@@ -2418,8 +2552,19 @@ export default function App() {
           })}
         </nav>
 
-        {/* Zone 3: Fullscreen toggle & Primary Export Action */}
+        {/* Zone 3: Quick Start, Fullscreen toggle & Primary Export Action */}
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setQuickStartOpen(true)}
+            aria-label={t.actions.quickStart}
+            title={t.actions.quickStart}
+            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs font-semibold rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#151922] text-zinc-800 dark:text-zinc-100 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-red-600 shrink-0" />
+            <span className="hidden sm:inline">{t.actions.quickStart}</span>
+          </button>
+
           <button
             type="button"
             onClick={handleToggleFullscreen}
@@ -2428,6 +2573,30 @@ export default function App() {
             className="p-2 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#151922] text-zinc-700 dark:text-zinc-200 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors shrink-0 cursor-pointer"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
+
+          <button
+            type="button"
+            disabled={copyingImage || exporting}
+            onClick={handleCopyActivePng}
+            aria-label={copiedImageFlash ? t.actions.copiedImage : t.actions.copyImage}
+            title={copiedImageFlash ? t.actions.copiedImage : t.actions.copyImage}
+            className={`inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 text-xs sm:text-sm font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 disabled:opacity-50 cursor-pointer ${
+              copiedImageFlash
+                ? 'border-emerald-600 bg-emerald-600/15 text-emerald-700 dark:text-emerald-300'
+                : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#151922] text-zinc-800 dark:text-zinc-100 hover:border-zinc-400 dark:hover:border-zinc-600'
+            }`}
+          >
+            {copiedImageFlash ? (
+              <Check className="w-4 h-4 shrink-0" />
+            ) : copyingImage ? (
+              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+            ) : (
+              <Copy className="w-4 h-4 shrink-0" />
+            )}
+            <span className="hidden lg:inline">
+              {copiedImageFlash ? t.actions.copiedImage : t.actions.copyImage}
+            </span>
           </button>
 
           <button
@@ -2711,6 +2880,29 @@ export default function App() {
 
             {/* Right Utility Controls */}
             <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center rounded-lg bg-white dark:bg-[#151922] border border-zinc-200 dark:border-zinc-800 overflow-hidden shrink-0">
+                <button
+                  type="button"
+                  disabled={!canUndo}
+                  onClick={() => undo()}
+                  aria-label={t.actions.undo}
+                  title={t.actions.undo}
+                  className="p-1.5 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-35 transition-colors cursor-pointer"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={!canRedo}
+                  onClick={() => redo()}
+                  aria-label={t.actions.redo}
+                  title={t.actions.redo}
+                  className="p-1.5 border-l border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-35 transition-colors cursor-pointer"
+                >
+                  <Redo2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               <PWAInstallButton t={t} compact />
 
               {/* Quick LTR / RTL Text Direction Toggle */}
@@ -3204,6 +3396,11 @@ export default function App() {
                           : t.news.licenseBuiltin}
                   </span>
                 </span>
+                <ContrastWarningBadge
+                  result={contrastCheck}
+                  label={t.contrast.lowContrastFix}
+                  onFix={handleFixContrast}
+                />
                 <span aria-hidden="true">·</span>
                 <span>
                   {dims.width} × {dims.height} px
@@ -3258,6 +3455,16 @@ export default function App() {
         onClose={() => setAboutOpen(false)}
         t={t}
         onNotify={notify}
+      />
+
+      {/* 30-Second Quick Start Guide & Starter Presets Modal */}
+      <QuickStartModal
+        open={quickStartOpen}
+        onClose={() => setQuickStartOpen(false)}
+        t={t}
+        onApplyBreakingPreset={handleApplyBreakingStarter}
+        onApplyQuotePreset={handleApplyQuotePreset}
+        onApplyDataPreset={handleApplyDataCardPreset}
       />
 
       {/* Offline Connectivity Indicator */}

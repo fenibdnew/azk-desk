@@ -99,15 +99,39 @@ export function generateSocialCaption(params: {
     lines.push(metaParts.join(' · '));
   }
 
-  if (handle || brandLabel) {
+  const isDataCard = activeSlide.layoutId === 'data-card';
+  const sourceLower = activeSlide.content.source.toLowerCase();
+  const isAqiData = isDataCard && sourceLower.includes('air quality');
+  const isWeatherData = isDataCard && sourceLower.includes('open-meteo') && !isAqiData;
+  const isQuakeData = isDataCard && sourceLower.includes('usgs');
+  const isHistoryData = isDataCard && sourceLower.includes('wikipedia');
+  const isSportsData =
+    isDataCard &&
+    (sourceLower.includes('scoreboard') || activeSlide.content.source.includes('স্কোরবোর্ড'));
+  const isFxData =
+    isDataCard &&
+    (sourceLower.includes('indicative rate') ||
+      sourceLower.includes('open er-api') ||
+      sourceLower.includes('frankfurter') ||
+      activeSlide.content.source.includes('নির্দেশক হার'));
+
+  if (isFxData) {
     lines.push(
       lang === 'bn'
-        ? `আরও আপডেটের জন্য অনুসরণ করুন ${handle || brandLabel}`
-        : `Follow ${handle || brandLabel} for daily updates.`
+        ? 'বিঃদ্রঃ এটি শুধুমাত্র তথ্যভিত্তিক নির্দেশক বিনিময় হার; এটি কোনো আর্থিক পরামর্শ নয়।'
+        : 'Note: Indicative reference rates for informational purposes only; not financial advice.'
     );
   }
 
-  // Contextual hashtags
+  if (handle || brandLabel) {
+    lines.push(
+      lang === 'bn'
+        ? `নিয়মিত তথ্যভিত্তিক আপডেটের জন্য অনুসরণ করুন ${handle || brandLabel}`
+        : `Follow ${handle || brandLabel} for regular informational updates.`
+    );
+  }
+
+  // Contextual neutral hashtags
   const tagSet = new Set<string>();
   const addTag = (raw: string) => {
     const tag = slugifyTag(raw);
@@ -119,7 +143,25 @@ export function generateSocialCaption(params: {
   if (slides.length > 1) {
     addTag(lang === 'bn' ? 'ক্যারোসেল' : 'NewsCarousel');
   }
-  if (lang === 'bn') {
+  if (isAqiData) {
+    addTag(lang === 'bn' ? 'বায়ুমান' : 'AirQuality');
+    addTag('AQI');
+  } else if (isWeatherData) {
+    addTag(lang === 'bn' ? 'আবহাওয়া' : 'WeatherUpdate');
+    addTag(lang === 'bn' ? 'তথ্যআপডেট' : 'OpenMeteo');
+  } else if (isQuakeData) {
+    addTag(lang === 'bn' ? 'ভূমিকম্প' : 'EarthquakeAlert');
+    addTag('USGS');
+  } else if (isHistoryData) {
+    addTag(lang === 'bn' ? 'ইতিহাসেরএইদিনে' : 'OnThisDay');
+    addTag(lang === 'bn' ? 'ইতিহাস' : 'WorldHistory');
+  } else if (isSportsData) {
+    addTag(lang === 'bn' ? 'খেলাধুলা' : 'SportsUpdate');
+    addTag(lang === 'bn' ? 'স্কোরবোর্ড' : 'Scoreboard');
+  } else if (isFxData) {
+    addTag(lang === 'bn' ? 'মুদ্রাহার' : 'ExchangeRates');
+    addTag(lang === 'bn' ? 'তথ্যচিত্র' : 'DataBrief');
+  } else if (lang === 'bn') {
     addTag('বাংলাদেশ');
     addTag('সংবাদ');
     addTag('বিশ্লেষণ');

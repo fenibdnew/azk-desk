@@ -161,3 +161,38 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
   document.body.removeChild(link);
   window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
+
+export async function copyCanvasToClipboard(canvas: HTMLCanvasElement): Promise<boolean> {
+  if (
+    typeof navigator === 'undefined' ||
+    !navigator.clipboard ||
+    typeof navigator.clipboard.write !== 'function' ||
+    typeof ClipboardItem === 'undefined'
+  ) {
+    return false;
+  }
+
+  return new Promise((resolve) => {
+    try {
+      canvas.toBlob(
+        async (blob) => {
+          if (!blob) {
+            resolve(false);
+            return;
+          }
+          try {
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            resolve(true);
+          } catch {
+            resolve(false);
+          }
+        },
+        'image/png',
+        1.0
+      );
+    } catch {
+      resolve(false);
+    }
+  });
+}
+

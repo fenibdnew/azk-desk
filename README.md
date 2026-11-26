@@ -71,8 +71,28 @@ Host or edit `config/daily-config.json` in your GitHub repository, copy its raw 
 
 ---
 
+## Windows SmartScreen & SHA-256 Verification
+
+**AZK Desk** is a free, independent public release without a commercial paid code-signing certificate. Because of this, Windows Defender SmartScreen may display an *"Unknown publisher"* notice the first time you open the desktop `.exe` installer or portable build.
+
+To verify your downloaded `.exe` safely before launching:
+
+1. **Verify the SHA-256 Checksum** against the hash published on the official GitHub Release page (`fenibdnew/azk-desk`):
+   - **PowerShell:**
+     ```powershell
+     Get-FileHash ".\AZK Desk-*.exe" -Algorithm SHA256
+     ```
+   - **Command Prompt (CMD):**
+     ```cmd
+     certutil -hashfile "AZK Desk-Portable.exe" SHA256
+     ```
+2. **Launch Safely**: Once the checksum matches, click **More info** → **Run anyway** on the Windows SmartScreen prompt.
+
+---
+
 ## Creator
 
-**AZK Desk** is built by **ARIFUZZAMAN (Kiron)**, Feni, Bangladesh.
+**AZK Desk** is built by **ARIFUZZAMAN (Kiron)** — Director, STC Tech Hand, Feni, Bangladesh.
 
 Created to serve newsrooms, creators, and communities around the world without paid API barriers—standing for clarity, accountability, and carrying the pride and resilience of Bangladesh to every corner of the globe.
+

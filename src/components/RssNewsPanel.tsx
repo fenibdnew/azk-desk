@@ -46,6 +46,8 @@ import {
   sanitizeCustomFeedUrl,
   sanitizeRssFeedResponse,
 } from '../utils/securitySanitizer';
+import { MAX_CUSTOM_RSS_FEEDS } from '../utils/rssPackUtils';
+import { RssPackManager } from './RssPackManager';
 
 interface RssNewsPanelProps {
   lang: Language;
@@ -94,7 +96,7 @@ function readSavedCustomFeeds(): string[] {
       if (safe && !valid.includes(safe)) {
         valid.push(safe);
       }
-      if (valid.length >= 6) break;
+      if (valid.length >= MAX_CUSTOM_RSS_FEEDS) break;
     }
     return valid;
   } catch {
@@ -642,10 +644,25 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
     setCustomFeedInput(safeUrl);
     setActiveCustomFeedUrl(safeUrl);
     setSavedCustomFeeds((prev) => {
-      const next = [safeUrl, ...prev.filter((u) => u !== safeUrl)].slice(0, 6);
+      const next = [safeUrl, ...prev.filter((u) => u !== safeUrl)].slice(0, MAX_CUSTOM_RSS_FEEDS);
       writePref(RSS_STORAGE_KEYS.savedCustomFeeds, JSON.stringify(next));
       return next;
     });
+  };
+
+  const handleImportRssPackUrls = (urls: string[]) => {
+    if (urls.length === 0) return;
+    setSavedCustomFeeds((prev) => {
+      const merged = [...urls, ...prev.filter((u) => !urls.includes(u))].slice(
+        0,
+        MAX_CUSTOM_RSS_FEEDS
+      );
+      writePref(RSS_STORAGE_KEYS.savedCustomFeeds, JSON.stringify(merged));
+      return merged;
+    });
+    setCustomFeedError(null);
+    setCustomFeedInput(urls[0]);
+    setActiveCustomFeedUrl(urls[0]);
   };
 
   const handleToggleSoundAlert = () => {
@@ -1287,6 +1304,14 @@ export const RssNewsPanel: React.FC<RssNewsPanelProps> = ({
                 })}
               </div>
             )}
+
+            <RssPackManager
+              lang={lang}
+              t={t}
+              savedFeeds={savedCustomFeeds}
+              onImportUrls={handleImportRssPackUrls}
+              onNotify={onNotify}
+            />
 
             {customFeedError && (
               <div className="flex items-start justify-between gap-2 p-2.5 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-300">

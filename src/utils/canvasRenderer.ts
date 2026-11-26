@@ -727,52 +727,120 @@ function drawAttributionFooter(
   ctx.lineTo(x + contentWidth, y);
   ctx.stroke();
 
-  const textY = y + Math.round(sourceSize * metaTypo.lineHeight * 1.15);
-  ctx.textBaseline = 'middle';
+  const fitFontSize = (text: string, weight: number, startSize: number, minSize: number, maxW: number): number => {
+    let size = startSize;
+    while (size > minSize) {
+      ctx.font = `${weight} ${size}px ${metaStack}`;
+      if (ctx.measureText(text).width <= maxW) break;
+      size -= 1;
+    }
+    return size;
+  };
 
+  const sourceText = source.trim();
+  const creditText = credit.trim();
+  const creditWeight = metaTypo.fontWeight >= 600 ? 500 : metaTypo.fontWeight;
+
+  const stampLabel = '✓ SOURCE & VERIFIED RSS';
+  const stampFontSize = Math.max(11, Math.min(16, Math.round(13 * scaleFactor)));
+  let stampPillW = 0;
+  let stampPillH = 0;
   let sourceOffset = 0;
   if (showVerifiedRssStamp) {
-    const stampLabel = '✓ SOURCE & VERIFIED RSS';
-    const stampFontSize = Math.max(11, Math.min(16, Math.round(13 * scaleFactor)));
     ctx.font = `700 ${stampFontSize}px ${metaStack}`;
     const labelW = ctx.measureText(stampLabel).width;
     const padX = Math.round(10 * scaleFactor);
-    const pillW = Math.ceil(labelW + padX * 2);
-    const pillH = Math.ceil(stampFontSize * 1.75);
-    const pillX = isRtl ? x + contentWidth - pillW : x;
-    const pillY = textY - pillH / 2;
+    stampPillW = Math.ceil(labelW + padX * 2);
+    stampPillH = Math.ceil(stampFontSize * 1.75);
+    sourceOffset = stampPillW + Math.round(12 * scaleFactor);
+  }
+
+  const availableMainW = Math.max(120, contentWidth - sourceOffset);
+
+  ctx.font = `${metaTypo.fontWeight} ${sourceSize}px ${metaStack}`;
+  const naturalSourceW = hasSource ? ctx.measureText(sourceText).width : 0;
+  ctx.font = `${creditWeight} ${creditSize}px ${metaStack}`;
+  const naturalCreditW = hasCredit ? ctx.measureText(creditText).width : 0;
+
+  // Stack onto 2 clean lines whenever source + credit won't fit comfortably side-by-side
+  // (eliminates horizontal glyph squishing on long disclaimers)
+  const needsTwoLines =
+    hasSource && hasCredit && naturalSourceW + naturalCreditW + 28 > availableMainW;
+
+  const lineOneY = needsTwoLines
+    ? y + Math.round(sourceSize * 0.92)
+    : y + Math.round(sourceSize * metaTypo.lineHeight * 1.15);
+
+  ctx.textBaseline = 'middle';
+
+  if (showVerifiedRssStamp) {
+    const pillX = isRtl ? x + contentWidth - stampPillW : x;
+    const pillY = lineOneY - stampPillH / 2;
 
     ctx.fillStyle = isLightSurface ? 'rgba(5, 150, 105, 0.14)' : 'rgba(16, 185, 129, 0.2)';
-    drawRoundedRect(ctx, pillX, pillY, pillW, pillH, 6);
+    drawRoundedRect(ctx, pillX, pillY, stampPillW, stampPillH, 6);
     ctx.fill();
 
     ctx.strokeStyle = isLightSurface ? 'rgba(5, 150, 105, 0.45)' : 'rgba(52, 211, 153, 0.55)';
     ctx.lineWidth = 1.5;
-    drawRoundedRect(ctx, pillX, pillY, pillW, pillH, 6);
+    drawRoundedRect(ctx, pillX, pillY, stampPillW, stampPillH, 6);
     ctx.stroke();
 
+    ctx.font = `700 ${stampFontSize}px ${metaStack}`;
     ctx.fillStyle = isLightSurface ? '#047857' : '#6EE7B7';
     ctx.textAlign = 'center';
-    ctx.fillText(stampLabel, pillX + pillW / 2, textY + 0.5);
-
-    sourceOffset = pillW + Math.round(12 * scaleFactor);
+    ctx.fillText(stampLabel, pillX + stampPillW / 2, lineOneY + 0.5);
   }
 
   if (hasSource) {
-    const maxSourceW = Math.max(80, contentWidth * 0.58 - sourceOffset);
-    ctx.font = `${metaTypo.fontWeight} ${sourceSize}px ${metaStack}`;
+    const maxSourceW = needsTwoLines
+      ? Math.max(120, contentWidth - sourceOffset)
+      : Math.max(120, contentWidth - sourceOffset - (hasCredit ? naturalCreditW + 24 : 0));
+    const fittedSourceSize = fitFontSize(
+      sourceText,
+      metaTypo.fontWeight,
+      sourceSize,
+      Math.max(12, Math.round(13 * scaleFactor)),
+      maxSourceW
+    );
+    ctx.font = `${metaTypo.fontWeight} ${fittedSourceSize}px ${metaStack}`;
     ctx.fillStyle = primaryColor;
     ctx.textAlign = isRtl ? 'right' : 'left';
     const sourceX = isRtl ? x + contentWidth - sourceOffset : x + sourceOffset;
-    ctx.fillText(source.trim(), sourceX, textY, maxSourceW);
+    ctx.fillText(sourceText, sourceX, lineOneY);
   }
 
   if (hasCredit) {
-    const creditWeight = metaTypo.fontWeight >= 600 ? 500 : metaTypo.fontWeight;
-    ctx.font = `${creditWeight} ${creditSize}px ${metaStack}`;
-    ctx.fillStyle = mutedColor;
-    ctx.textAlign = isRtl ? 'left' : 'right';
-    ctx.fillText(credit.trim(), isRtl ? x : x + contentWidth, textY, contentWidth * 0.38);
+    if (needsTwoLines) {
+      const targetCreditSize = Math.max(12, Math.min(creditSize, Math.round(16 * scaleFactor)));
+      const fittedCreditSize = fitFontSize(
+        creditText,
+        creditWeight,
+        targetCreditSize,
+        Math.max(11, Math.round(12 * scaleFactor)),
+        contentWidth
+      );
+      const lineTwoY = lineOneY + Math.round(sourceSize * 1.15) + 4;
+      ctx.font = `${creditWeight} ${fittedCreditSize}px ${metaStack}`;
+      ctx.fillStyle = mutedColor;
+      ctx.textAlign = isRtl ? 'right' : 'left';
+      ctx.fillText(creditText, isRtl ? x + contentWidth : x, lineTwoY);
+    } else {
+      const maxCreditW = hasSource
+        ? Math.max(120, contentWidth - sourceOffset - naturalSourceW - 24)
+        : contentWidth;
+      const fittedCreditSize = fitFontSize(
+        creditText,
+        creditWeight,
+        creditSize,
+        Math.max(12, Math.round(13 * scaleFactor)),
+        maxCreditW
+      );
+      ctx.font = `${creditWeight} ${fittedCreditSize}px ${metaStack}`;
+      ctx.fillStyle = mutedColor;
+      ctx.textAlign = isRtl ? 'left' : 'right';
+      ctx.fillText(creditText, isRtl ? x : x + contentWidth, lineOneY);
+    }
   }
 
   ctx.restore();
@@ -902,69 +970,7 @@ export function renderNewsCard(params: RenderCardParams): void {
     ctx.fillStyle = theme.accent;
     ctx.fillRect(0, 0, width, isLandscape ? 8 : 10);
 
-    const anchorX = getAnchorX(marginX, width - marginX);
-    let cursorY = isLandscape ? 118 : isStory ? 248 : 178;
-
-    if (content.category.trim()) {
-      const b = drawBadge(
-        ctx,
-        content.category.trim(),
-        anchorX,
-        cursorY,
-        theme.badgeBg,
-        theme.badgeText,
-        badgeFontSize,
-        resolvedAlign,
-        direction,
-        hookStack
-      );
-      cursorY += b.height + (isLandscape ? 12 : 16);
-    }
-
-    if (content.hook.trim()) {
-      const hkSize = Math.max(15, Math.min(30, Math.round((hookTypo.fontSize - 1) * typeScale)));
-      const hkLineH = Math.round(hkSize * hookTypo.lineHeight);
-      ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
-      ctx.fillStyle = rgba('#FFFFFF', 0.82);
-      ctx.textAlign = resolvedAlign;
-      ctx.textBaseline = 'top';
-      const hookLines = wrapText(ctx, content.hook.trim(), contentWidth, 2);
-      for (const line of hookLines) {
-        ctx.fillText(line, anchorX, cursorY);
-        cursorY += hkLineH;
-      }
-      cursorY += 8;
-    }
-
-    const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
-    const hlSize = Math.min(isLandscape ? 46 : 58, Math.max(28, baseHl - 10));
-    const hlLineH = Math.round(hlSize * hlTypo.lineHeight);
-    ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = resolvedAlign;
-    ctx.textBaseline = 'top';
-    const hlLines = wrapText(ctx, content.headline, contentWidth, isLandscape ? 2 : 3);
-    for (const line of hlLines) {
-      ctx.fillText(line, anchorX, cursorY);
-      cursorY += hlLineH;
-    }
-
-    if (content.body.trim()) {
-      cursorY += 8;
-      const bdSize = Math.max(15, Math.min(28, Math.round((bodyTypo.fontSize - 4) * typeScale)));
-      const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
-      ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
-      ctx.fillStyle = rgba('#E2E8F0', 0.85);
-      ctx.textAlign = resolvedAlign;
-      ctx.textBaseline = 'top';
-      const bodyLines = wrapText(ctx, content.body, contentWidth, 2);
-      for (const line of bodyLines) {
-        ctx.fillText(line, anchorX, cursorY);
-        cursorY += bdLineH;
-      }
-    }
-
-    // Customizable Key-Value Metric Rows
+    // Resolve metric rows first so 1:1 Square with 5–6 rows gets balanced vertical spacing
     const fallbackRows: DataCardRow[] = [
       { id: 'r1', label: 'EUR / USD', value: '1.0842', delta: '+0.32%' },
       { id: 'r2', label: 'Gold (1 oz)', value: '$2,645', delta: '+1.14%' },
@@ -975,34 +981,123 @@ export function renderNewsCard(params: RenderCardParams): void {
       content.dataRows && content.dataRows.length > 0
         ? content.dataRows.filter((r) => r.label.trim() || r.value.trim()).slice(0, 6)
         : fallbackRows;
+    const isSquareDense = !isLandscape && !isStory && !isPortrait && rows.length >= 5;
 
-    const tableTop = cursorY + (isLandscape ? 18 : 26);
-    const footerY = height - footerOffset;
-    const warnReserve = warningActive ? Math.round(56 * typeScale) : 0;
-    const tableBottom = footerY - warnReserve - (isLandscape ? 16 : 24);
-    const availableH = Math.max(140, tableBottom - tableTop);
+    const anchorX = getAnchorX(marginX, width - marginX);
+    let cursorY = isLandscape ? 114 : isStory ? 244 : isSquareDense ? 152 : 174;
+
+    if (content.category.trim()) {
+      const b = drawBadge(
+        ctx,
+        content.category.trim(),
+        anchorX,
+        cursorY,
+        theme.badgeBg,
+        theme.badgeText,
+        isSquareDense ? Math.round(badgeFontSize * 0.9) : badgeFontSize,
+        resolvedAlign,
+        direction,
+        hookStack
+      );
+      cursorY += b.height + (isLandscape ? 10 : isSquareDense ? 10 : 14);
+    }
+
+    if (content.hook.trim()) {
+      const hkSize = Math.max(
+        15,
+        Math.min(isSquareDense ? 22 : 28, Math.round((hookTypo.fontSize - 1) * typeScale))
+      );
+      const hkLineH = Math.round(hkSize * (isSquareDense ? 1.2 : hookTypo.lineHeight));
+      ctx.font = `${hookTypo.fontWeight} ${hkSize}px ${hookStack}`;
+      ctx.fillStyle = rgba('#FFFFFF', 0.82);
+      ctx.textAlign = resolvedAlign;
+      ctx.textBaseline = 'top';
+      const hookLines = wrapText(ctx, content.hook.trim(), contentWidth, isSquareDense ? 1 : 2);
+      for (const line of hookLines) {
+        ctx.fillText(line, anchorX, cursorY);
+        cursorY += hkLineH;
+      }
+      cursorY += isSquareDense ? 4 : 8;
+    }
+
+    const baseHl = Math.round((hlTypo.fontSize || content.headlineSize) * typeScale);
+    const hlSize = Math.min(
+      isLandscape ? 44 : isSquareDense ? 44 : 56,
+      Math.max(26, baseHl - (isSquareDense ? 14 : 10))
+    );
+    const hlLineH = Math.round(hlSize * (isSquareDense ? 1.15 : hlTypo.lineHeight));
+    ctx.font = `${hlTypo.fontWeight} ${hlSize}px ${headlineStack}`;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = resolvedAlign;
+    ctx.textBaseline = 'top';
+    const hlLines = wrapText(
+      ctx,
+      content.headline,
+      contentWidth,
+      isLandscape || isSquareDense ? 2 : 3
+    );
+    for (const line of hlLines) {
+      ctx.fillText(line, anchorX, cursorY);
+      cursorY += hlLineH;
+    }
+
+    if (content.body.trim()) {
+      cursorY += isSquareDense ? 5 : 8;
+      const bdSize = Math.max(15, Math.min(26, Math.round((bodyTypo.fontSize - 4) * typeScale)));
+      const bdLineH = Math.round(bdSize * bodyTypo.lineHeight);
+      ctx.font = `${bodyTypo.fontWeight} ${bdSize}px ${bodyStack}`;
+      ctx.fillStyle = rgba('#E2E8F0', 0.85);
+      ctx.textAlign = resolvedAlign;
+      ctx.textBaseline = 'top';
+      const bodyLines = wrapText(ctx, content.body, contentWidth, isSquareDense ? 1 : 2);
+      for (const line of bodyLines) {
+        ctx.fillText(line, anchorX, cursorY);
+        cursorY += bdLineH;
+      }
+    }
+
+    const tableTop = cursorY + (isLandscape ? 16 : isSquareDense ? 14 : 24);
+    const dataFooterOffset = isStory ? 186 : isLandscape ? 82 : 106;
+    const footerY = height - dataFooterOffset;
+    const warnReserve = warningActive ? Math.round(54 * typeScale) : 0;
+    const tableBottom = footerY - warnReserve - (isLandscape ? 14 : isSquareDense ? 16 : 22);
+    const availableH = Math.max(160, tableBottom - tableTop);
 
     const useTwoCols = isLandscape && rows.length >= 4;
     const colGap = 18;
-    const rowGap = isLandscape ? 12 : 16;
+    const rowGap = isLandscape ? 11 : isSquareDense ? 10 : 15;
     const numCols = useTwoCols ? 2 : 1;
     const numVisualRows = Math.ceil(rows.length / numCols);
     const colW = useTwoCols ? (contentWidth - colGap) / 2 : contentWidth;
-    const maxRowH = isLandscape ? 88 : isStory ? 132 : 104;
-    const minRowH = isLandscape ? 58 : 74;
-    const computedRowH = Math.floor((availableH - rowGap * Math.max(0, numVisualRows - 1)) / Math.max(1, numVisualRows));
-    const rowH = Math.max(minRowH, Math.min(maxRowH, computedRowH));
+    const maxRowH = isLandscape ? 88 : isStory ? 132 : isSquareDense ? 82 : 104;
+    const computedRowH = Math.floor(
+      (availableH - rowGap * Math.max(0, numVisualRows - 1)) / Math.max(1, numVisualRows)
+    );
+    const rowH = Math.max(46, Math.min(maxRowH, computedRowH));
 
-    const labelSize = Math.max(17, Math.min(30, Math.round((useTwoCols ? 21 : 26) * typeScale)));
-    const valueSize = Math.max(20, Math.min(38, Math.round((useTwoCols ? 26 : 34) * typeScale)));
-    const deltaSize = Math.max(13, Math.min(20, Math.round(16 * typeScale)));
+    // Vertically center the metric stack neatly inside [tableTop, tableBottom]
+    const totalRowsH = numVisualRows * rowH + Math.max(0, numVisualRows - 1) * rowGap;
+    const startTableY = tableTop + Math.max(0, Math.floor((availableH - totalRowsH) / 2));
+
+    const compactRow = rowH <= 72;
+    const labelSize = Math.max(
+      16,
+      Math.min(28, Math.round((useTwoCols ? 20 : compactRow ? 22 : 26) * typeScale))
+    );
+    const valueSize = Math.max(
+      19,
+      Math.min(36, Math.round((useTwoCols ? 25 : compactRow ? 27 : 34) * typeScale))
+    );
+    const deltaSize = Math.max(
+      12,
+      Math.min(18, Math.round((compactRow ? 13.5 : 16) * typeScale))
+    );
 
     rows.forEach((row, idx) => {
       const colIdx = useTwoCols ? idx % 2 : 0;
       const rowIdx = useTwoCols ? Math.floor(idx / 2) : idx;
       const rx = marginX + colIdx * (colW + colGap);
-      const ry = tableTop + rowIdx * (rowH + rowGap);
-      if (ry + rowH > tableBottom + 6) return;
+      const ry = startTableY + rowIdx * (rowH + rowGap);
 
       ctx.save();
       ctx.fillStyle = 'rgba(15, 23, 42, 0.72)';
@@ -1016,13 +1111,14 @@ export function renderNewsCard(params: RenderCardParams): void {
 
       // Subtle accent bar on leading side of each metric row
       ctx.fillStyle = theme.accent;
+      const barPad = Math.max(8, Math.round(rowH * 0.16));
       if (isRtl) {
-        ctx.fillRect(rx + colW - 6, ry + 12, 6, rowH - 24);
+        ctx.fillRect(rx + colW - 6, ry + barPad, 6, rowH - barPad * 2);
       } else {
-        ctx.fillRect(rx, ry + 12, 6, rowH - 24);
+        ctx.fillRect(rx, ry + barPad, 6, rowH - barPad * 2);
       }
 
-      const innerPadX = isLandscape ? 22 : 28;
+      const innerPadX = isLandscape ? 22 : 26;
       const midY = ry + rowH / 2;
       const deltaText = (row.delta || '').trim();
       const hasDelta = deltaText.length > 0;
@@ -1036,20 +1132,20 @@ export function renderNewsCard(params: RenderCardParams): void {
       const labelX = isRtl ? rx + colW - innerPadX : rx + innerPadX;
       ctx.fillText(row.label.trim() || '—', labelX, midY, colW * 0.52);
 
-      // Value (+ optional delta below or beside) on trailing side
+      // Value (+ optional delta below) on trailing side
       const trailingX = isRtl ? rx + innerPadX : rx + colW - innerPadX;
       ctx.textAlign = isRtl ? 'left' : 'right';
       ctx.font = `700 ${valueSize}px "JetBrains Mono", ${headlineStack}`;
       ctx.fillStyle = '#FFFFFF';
-      const valueY = hasDelta ? midY - Math.round(deltaSize * 0.55) : midY;
-      ctx.fillText(row.value.trim() || '—', trailingX, valueY, colW * 0.42);
+      const valueY = hasDelta ? midY - Math.round(deltaSize * 0.62) : midY;
+      ctx.fillText(row.value.trim() || '—', trailingX, valueY, colW * 0.44);
 
       if (hasDelta) {
         const isPositive = /^\+|▲|↑/.test(deltaText);
         const isNegative = /^-|▼|↓/.test(deltaText);
         ctx.font = `600 ${deltaSize}px "JetBrains Mono", ${metaStack}`;
         ctx.fillStyle = isPositive ? '#34D399' : isNegative ? '#FB7185' : '#94A3B8';
-        ctx.fillText(deltaText, trailingX, midY + Math.round(valueSize * 0.52), colW * 0.42);
+        ctx.fillText(deltaText, trailingX, midY + Math.round(valueSize * 0.48), colW * 0.44);
       }
       ctx.restore();
     });

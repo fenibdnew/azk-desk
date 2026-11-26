@@ -49,6 +49,7 @@ import {
   FONT_WEIGHT_OPTIONS,
 } from '../utils/fontManager';
 import { formatCardDateBadge } from '../utils/calendarFormatter';
+import { LiveDataFetcherBar } from './LiveDataFetcherBar';
 
 interface ContentPanelProps {
   lang: Language;
@@ -259,11 +260,15 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
             onClick={onApplyQuotePreset}
             className={`inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors truncate cursor-pointer ${
               activeLayoutId === 'quote'
-                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-500 dark:bg-zinc-800 dark:text-white'
                 : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
             }`}
           >
-            <Quote className="w-3.5 h-3.5 text-red-600 shrink-0" />
+            <Quote
+              className={`w-3.5 h-3.5 shrink-0 ${
+                activeLayoutId === 'quote' ? 'text-white' : 'text-red-600'
+              }`}
+            />
             <span className="truncate">{t.actions.quotePresetBtn}</span>
           </button>
 
@@ -272,11 +277,15 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
             onClick={onApplyDataCardPreset}
             className={`inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors truncate cursor-pointer ${
               activeLayoutId === 'data-card'
-                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-500 dark:bg-zinc-800 dark:text-white'
                 : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
             }`}
           >
-            <BarChart3 className="w-3.5 h-3.5 text-red-600 shrink-0" />
+            <BarChart3
+              className={`w-3.5 h-3.5 shrink-0 ${
+                activeLayoutId === 'data-card' ? 'text-white' : 'text-red-600'
+              }`}
+            />
             <span className="truncate">{t.actions.dataCardPresetBtn}</span>
           </button>
 
@@ -285,11 +294,15 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
             onClick={onApplyThumbnailPreset}
             className={`inline-flex items-center justify-center gap-1.5 px-2 py-1.5 text-[11px] font-semibold rounded-lg border transition-colors truncate cursor-pointer ${
               activeLayoutId === 'thumbnail'
-                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
+                ? 'border-zinc-900 bg-zinc-900 text-white dark:border-zinc-500 dark:bg-zinc-800 dark:text-white'
                 : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-200 hover:border-zinc-400'
             }`}
           >
-            <Film className="w-3.5 h-3.5 text-red-600 shrink-0" />
+            <Film
+              className={`w-3.5 h-3.5 shrink-0 ${
+                activeLayoutId === 'thumbnail' ? 'text-white' : 'text-red-600'
+              }`}
+            />
             <span className="truncate">{t.actions.thumbnailPresetBtn}</span>
           </button>
         </div>
@@ -583,6 +596,13 @@ export const ContentPanel: React.FC<ContentPanelProps> = ({
                 <span>{t.content.addDataRow}</span>
               </button>
             </div>
+
+            <LiveDataFetcherBar
+              lang={lang}
+              t={t}
+              onApplyPatch={onChangeContent}
+              onNotify={onNotify}
+            />
 
             <div className="space-y-2">
               {(content.dataRows || []).map((row, idx) => (
